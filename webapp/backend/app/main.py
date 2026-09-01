@@ -1,8 +1,9 @@
 import pandas as pd
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import fault_model, forecast_model, overview
+from . import fault_model, forecast_model, overview, weather
 from .data import load_plant
 
 app = FastAPI(title="Solar Plant Manager API")
@@ -74,3 +75,11 @@ def get_inverter_detail(plant_id: int, source_key: str, as_of: str):
 def get_forecast(plant_id: int, as_of: str):
     _require_plant(plant_id)
     return forecast_model.forecast_series(plant_id, _parse_as_of(as_of))
+
+
+@app.get("/api/weather/current")
+def get_current_weather(lat: float, lon: float):
+    try:
+        return weather.get_current_conditions(lat, lon)
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Weather provider error: {e}")

@@ -371,3 +371,62 @@ once the SQL migration was run and the test account's email confirmed:
 stored lat/lon/tariff instead of the hardcoded constants — that's a
 FastAPI change (accept plant params, or look them up) that makes sense to
 do once there's a real per-user data flow to attach it to, not before.
+
+## Phase 12 — Real Weather Ingestion  ✅
+
+First half of "data connection" (the second half — synthetic panel-output
+generation from this weather — is separate, deliberately deferred). Full
+design/reasoning in the approved plan at the time
+(`~/.claude/plans/okay-i-want-to-resilient-church.md`); summary here.
+
+**Decisions from brainstorm**: weather-fetching logic lives in the FastAPI
+backend (reuses `pvlib`, sets up the foundation for later combining weather
++ physics into synthetic output); ingestion is triggered by client-side
+polling while the app is open (real scheduled/background ingestion is
+explicit future work — a known limitation, not an oversight); pipeline
+only, no UI yet.
+
+**Built**:
+- [x] `app/weather.py` — `fetch_current_weather()` (Open-Meteo, free, no API
+      key: temperature, cloud cover, GHI/DNI/DHI) + `get_clearsky_ghi()`
+      (same `pvlib.location.Location(...).get_clearsky()` approach as
+      `solar_features.py`, but parameterized per-request instead of that
+      file's hardcoded Plant 1/2 constants — kept as a separate function
+      rather than modifying the verified existing one). Combined into
+      `clearsky_index`, null-gated below 5° solar elevation (same day/night
+      guard pattern as `solar_features.py`)
+- [x] `GET /api/weather/current?lat=&lon=` — stateless, no DB writes on the
+      backend side; storage happens in Supabase from the frontend, keeping
+      the backend Supabase-unaware (no new secrets needed there)
+- [x] `webapp/supabase/002_weather_readings.sql` — `weather_readings` table,
+      `unique(plant_id, recorded_at)` so repeated polling near the same
+      Open-Meteo update cycle doesn't spam duplicates, RLS via a join
+      through `plants.user_id` (this table has no direct `user_id` column)
+- [x] `lib/weather.ts` — fetch from backend, upsert to Supabase with
+      `ignoreDuplicates`
+- [x] `components/WeatherIngestion.tsx` — renders nothing, mounted in root
+      layout inside `PlantProvider` so it runs on every page once a plant
+      exists; fetches immediately on mount then every 15 minutes; catches
+      and logs errors without crashing the app
+
+**Verified against real services throughout, not mocked**:
+- Backend endpoint tested at both a nighttime location (Pune, ~2:30am
+  local — correctly returned GHI=0, `clearsky_index: null`) and a
+  simultaneous daytime location (Auckland — GHI=315 W/m², clear-sky max
+  383.8 W/m², `clearsky_index: 0.821`, all physically consistent with the
+  56% cloud cover reported)
+- Before the SQL migration was run: confirmed the component fails
+  gracefully (a caught, logged warning — `PGRST205 table not found` — not a
+  crash)
+- After the migration: confirmed a real row lands in `weather_readings`
+  matching the backend's output, queried directly via the Supabase REST API
+  using the authenticated user's own access token
+- Confirmed RLS: the identical query with only the anon key returns nothing
+- Confirmed the dedup constraint: reloaded the page (triggering a second
+  ingestion cycle within the same clock-hour), row count stayed at 1 rather
+  than duplicating
+
+**Explicitly not done yet**: the synthetic panel-output module (weather →
+physical model → fake-but-grounded power readings) — that's the deferred
+"hardware part" from the brainstorm, a separate next step. Also not done:
+real scheduled ingestion independent of a browser tab being open.
