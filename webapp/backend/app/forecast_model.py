@@ -14,6 +14,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 
 from .data import load_plant
+from .fault_model import TARIFF_PER_KWH
 
 FORECAST_NOISE_SIGMA = 0.15
 RNG_SEED = 42
@@ -63,7 +64,8 @@ def forecast_series(plant: int, as_of: pd.Timestamp) -> dict:
     history_records = history.astype(object).where(history.notna(), None).to_dict("records")
 
     if len(train) < 8:
-        return {"history": history_records, "forecast_tomorrow_kwh": None, "insufficient_data": True}
+        return {"history": history_records, "forecast_tomorrow_kwh": None, "forecast_range": None,
+                "monthly_revenue_projection": None, "insufficient_data": True}
 
     X_train, y_train = train[FEATURES], train["AC_ENERGY_KWH"]
     rf = RandomForestRegressor(n_estimators=200, max_depth=4, random_state=0)
@@ -71,11 +73,31 @@ def forecast_series(plant: int, as_of: pd.Timestamp) -> dict:
 
     next_row = daily[daily["DATE"] == as_of + pd.Timedelta(days=1)]
     forecast_kwh = None
+    forecast_range = None
     if not next_row.empty and next_row[FEATURES].notna().all(axis=None):
-        forecast_kwh = round(float(rf.predict(next_row[FEATURES])[0]), 1)
+        X_next = next_row[FEATURES]
+        forecast_kwh = round(float(rf.predict(X_next)[0]), 1)
+        # Spread across the forest's individual trees as a lightweight,
+        # honest uncertainty band — not a calibrated confidence interval,
+        # but a real signal of how much the trees disagree on this input.
+        tree_preds = np.array([est.predict(X_next)[0] for est in rf.estimators_])
+        forecast_range = {
+            "low": round(float(np.percentile(tree_preds, 10)), 1),
+            "high": round(float(np.percentile(tree_preds, 90)), 1),
+        }
+
+    # Owners think in revenue, not kWh — project the next 30 days from the
+    # recent week's actual average. Same illustrative tariff as fault_model,
+    # imported from there rather than duplicated.
+    recent = train.tail(7)["AC_ENERGY_KWH"]
+    monthly_revenue_projection = (
+        round(float(recent.mean() * 30 * TARIFF_PER_KWH), 0) if len(recent) else None
+    )
 
     return {
         "history": history_records,
         "forecast_tomorrow_kwh": forecast_kwh,
+        "forecast_range": forecast_range,
+        "monthly_revenue_projection": monthly_revenue_projection,
         "insufficient_data": False,
     }

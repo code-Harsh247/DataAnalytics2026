@@ -188,10 +188,26 @@ still genuinely useful. State this plainly in the UI copy, not just here.
       intended (see PRODUCT_PLAN.md Phase 3 for why this finding matters);
       no real console errors
 
-## Phase 7 — Frontend: Forecast page
+## Phase 7 — Frontend: Forecast page  ✅
 
-- [ ] Forecast vs actual chart with baselines for comparison
-- [ ] Running monthly revenue projection (owners think in revenue, not kWh)
+- [x] Backend enhancement: added `forecast_range` (10th-90th percentile
+      spread across the Random Forest's individual trees — a lightweight,
+      honest uncertainty band, explicitly not a calibrated confidence
+      interval) and `monthly_revenue_projection` (last 7 days' actual average
+      x 30 x the same illustrative tariff used elsewhere, imported from
+      `fault_model` rather than duplicated)
+- [x] Forecast vs actual chart with baselines (`ForecastChart.tsx`) — actual,
+      persistence, and climatology as continuous lines, tomorrow's forecast
+      rendered as an isolated highlighted dot via a separate `dataKey` with
+      `connectNulls={false}` (renders as a standalone point, not connected to
+      the history lines — visually distinct on purpose)
+- [x] KPI cards: tomorrow's forecast (with range), 30-day revenue projection
+- [x] Added `/forecast` to nav
+- [x] Verified in-browser: at the dataset's last day, correctly shows "No
+      data yet" for tomorrow (honest, since there's no next-day data to
+      forecast against); scrubbing back one day shows a real forecast number,
+      range, and the isolated green dot rendering correctly on the chart; no
+      console errors at all this time
 
 ## Phase 8 — Polish
 

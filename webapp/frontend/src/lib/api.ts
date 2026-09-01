@@ -76,9 +76,16 @@ export interface ForecastHistoryPoint {
   climatology_kwh: number | null;
 }
 
+export interface ForecastRange {
+  low: number;
+  high: number;
+}
+
 export interface Forecast {
   history: ForecastHistoryPoint[];
   forecast_tomorrow_kwh: number | null;
+  forecast_range: ForecastRange | null;
+  monthly_revenue_projection: number | null;
   insufficient_data?: boolean;
 }
 
