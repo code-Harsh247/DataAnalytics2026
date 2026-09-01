@@ -112,13 +112,29 @@ still genuinely useful. State this plainly in the UI copy, not just here.
 - [x] Wired into both `inverter_summary` (queue list) and `inverter_detail`
       (per-inverter page) — verified via curl against the running API
 
-## Phase 4 — Frontend: Scaffold & data layer
+## Phase 4 — Frontend: Scaffold & data layer  ✅
 
-- [ ] Next.js app setup, typed API client, global layout
-- [ ] Timeline scrubber component + play/pause control — global state (e.g.
-      React context) for the current `as_of` date, shared across all pages
-- [ ] Loading/error states for API calls (a real product handles these, not
-      just the happy path)
+- [x] Typed API client (`src/lib/api.ts`) — one function + TS interface per
+      backend endpoint
+- [x] `SimulationProvider` (`src/context/SimulationContext.tsx`) — global
+      `as_of` state: fetches the plant's date range once, exposes
+      `currentDate`/`currentIndex`, play/pause with 1s auto-advance. Hardcoded
+      to Plant 2 (single-plant v1 scope decision)
+- [x] `TimelineScrubber` component — range slider + play/pause, wired into
+      root `layout.tsx` so it's global across all future pages
+- [x] Loading/error states for the timeline fetch and the placeholder page's
+      overview fetch
+- [x] **Bug found via the end-to-end wiring check itself**: `enumerateDates`
+      mixed local-time `Date` construction with `.toISOString()`, which
+      shifts every date by the browser's UTC offset — the scrubber defaulted
+      to 2020-06-16 instead of the real last day 2020-06-17. Fixed with pure
+      `Date.UTC()` arithmetic throughout. Worth remembering: this exact
+      footgun (local-time construct + UTC-string read) is an easy one to
+      reintroduce later.
+- [x] Verified in-browser end-to-end: scrubber drag updates `as_of` and
+      triggers a real API call (confirmed day-1 shows 1-point trend, 2 active
+      risks matching earlier backend testing); Play button auto-advances the
+      index (~1/sec) and toggles to "Pause" correctly; zero console errors
 
 ## Phase 5 — Frontend: Command Center page
 
