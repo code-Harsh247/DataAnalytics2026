@@ -307,7 +307,7 @@ together with that, not bolted on separately now.
       (Authentication → Providers → Email) if faster iteration matters more
       than the (minimal, for a demo) security value here.
 
-## Phase 11 — Plant Setup (Onboarding Step 2)  🚧 in progress
+## Phase 11 — Plant Setup (Onboarding Step 2)  ✅
 
 After signup, a logged-in user with no configured plant is sent to
 `/setup-plant` before the dashboard is reachable at all.
@@ -351,11 +351,21 @@ After signup, a logged-in user with no configured plant is sent to
       `/login`; page compiles with no console errors beyond the known
       harmless HMR noise
 
-**Blocked on**: testing the actual form submission end-to-end requires an
-authenticated session, which requires either clicking the pending Supabase
-confirmation email, or disabling "Confirm email" in the Supabase dashboard.
-Also blocked on the `plants` table not existing yet until the SQL migration
-is run.
+**Fully verified end-to-end against the real Supabase project, not mocked**,
+once the SQL migration was run and the test account's email confirmed:
+- Sign in → `AuthGate` correctly detected authenticated-but-no-plant and
+  redirected straight to `/setup-plant` (not the dashboard)
+- Submitted the form (name, lat/lon, tariff; optional fields left blank) →
+  confirmation screen shown immediately
+- **Reloaded the page** — confirmation screen reappeared (fetched fresh from
+  the DB via `PlantContext`, not just leftover in-memory state), proving
+  persistence actually works, not just the optimistic UI
+- **Queried the row directly via the Supabase REST API with the user's own
+  access token** — all Tier 1 fields correct, all untouched Tier 2 fields
+  correctly `null`, scoped to the right `user_id`
+- **Confirmed RLS is doing real work, not just present**: the same query
+  with only the anon key (no user token) returned an empty array — the row
+  exists but is invisible without the owning user's session
 
 **Explicitly not done yet**: wiring the backend to actually use a plant's
 stored lat/lon/tariff instead of the hardcoded constants — that's a
