@@ -40,30 +40,49 @@ still genuinely useful. State this plainly in the UI copy, not just here.
       `webapp/backend/app/`, informed by (not copied from) the validated
       analysis approach
 
-## Phase 1 — Backend: Refactor analysis code into a service layer
+## Phase 1 — Backend: Refactor analysis code into a service layer  ✅
 
-- [ ] Extract reusable logic from `src/fault_detection.py`, `forecasting.py`,
-      `solar_features.py`, `data_loader.py` into functions that return
-      JSON-serializable dicts, not prints/saved PNGs — charts render
-      client-side now
-- [ ] Add an `as_of` parameter throughout so every computation can be scoped
-      to "using only data up to this point" — this is what makes the
-      timeline scrubber (Phase 4) actually work, and it reuses the same
-      leakage discipline already built for forecasting
-- [ ] Cache/precompute the expensive parts (the cross-validated expected-power
-      model) — recomputing per API request would be slow; compute once at
-      startup or on first request, keyed by plant
+- [x] Rewrote the analysis logic fresh under `webapp/backend/app/` (`data.py`,
+      `solar_features.py`, `fault_model.py`, `forecast_model.py`,
+      `overview.py`) — pure functions returning JSON-serializable dicts, no
+      prints/saved PNGs; charts render client-side now
+- [x] `as_of` parameter threaded through every computation — the fault model
+      is fit once on the full known history (cached; a realistic
+      "commissioning baseline," not something a real product would retrain
+      per-request either), while `as_of` controls how much of that history
+      is *revealed* to summary/detail views. The forecast model retrains per
+      request on data <= as_of (cheap at 34 rows) — this is where the actual
+      leakage discipline lives, reused directly from the original design
+- [x] Caching: `data.py`/`fault_model.py`/`forecast_model.py` each cache their
+      expensive computation (data load, cross-validated RF fit, daily
+      aggregation) in a module-level dict keyed by plant, computed lazily on
+      first request
+- [x] **Verified against the original analysis's numbers as a correctness
+      check**: Plant 2 total estimated revenue lost = 2850.64 here vs ≈2,851
+      in the original `fault_detection.py` output — same 3 inverters flagged
+      at_risk. Confirms the refactor is faithful, not just "runs without
+      errors"
 
-## Phase 2 — Backend: API endpoints
+## Phase 2 — Backend: API endpoints  ✅
 
-- [ ] `GET /api/plants` — available plants
-- [ ] `GET /api/plants/{id}/timeline` — valid date range for the scrubber
-- [ ] `GET /api/plants/{id}/overview?as_of=` — command-center KPIs
-- [ ] `GET /api/plants/{id}/inverters?as_of=` — maintenance queue + risk scores
-- [ ] `GET /api/plants/{id}/inverters/{source_key}?as_of=` — detail view data
-      (residual-vs-irradiance points, diagnosis, trend)
-- [ ] `GET /api/plants/{id}/forecast?as_of=` — forecast vs actual vs baselines
-- [ ] Verify each endpoint via Swagger UI / curl before wiring the frontend
+- [x] `GET /api/plants`
+- [x] `GET /api/plants/{id}/timeline`
+- [x] `GET /api/plants/{id}/overview?as_of=`
+- [x] `GET /api/plants/{id}/inverters?as_of=`
+- [x] `GET /api/plants/{id}/inverters/{source_key}?as_of=`
+- [x] `GET /api/plants/{id}/forecast?as_of=`
+- [x] Verified via curl: happy path for all 6 endpoints, plus edge cases —
+      unknown plant (404), invalid date (400), earliest possible `as_of`
+      (day 1, minimal data, doesn't crash)
+- [x] **Bug found & fixed:** Starlette's JSON response rejects NaN
+      (`allow_nan=False`) — the forecast history's first day has no prior day
+      for `PERSISTENCE`/`CLIMATOLOGY`, producing NaN that crashed
+      serialization. Fixed by converting NaN to `None` before returning.
+- [x] **Tooling gotcha found:** uvicorn's `--reload` silently got stuck mid-
+      reload (logged "Reloading..." but never logged a new "Started server
+      process" — kept serving the old worker). Cost real debugging time
+      chasing a "fix that isn't taking effect." Resolution: stop/restart the
+      server fully rather than trust `--reload` after a burst of rapid edits.
 
 ## Phase 3 — Backend: Trend-based risk scoring (new logic, not yet built)
 
