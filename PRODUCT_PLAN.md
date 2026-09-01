@@ -136,11 +136,33 @@ still genuinely useful. State this plainly in the UI copy, not just here.
       risks matching earlier backend testing); Play button auto-advances the
       index (~1/sec) and toggles to "Pause" correctly; zero console errors
 
-## Phase 5 — Frontend: Command Center page
+## Phase 5 — Frontend: Command Center page  ✅
 
-- [ ] KPI cards: health score, today's generation vs expected, active risk
-      count, tomorrow's forecast teaser
-- [ ] Daily generation trend chart (actual vs expected)
+- [x] KPI cards (`KpiCard.tsx`): health score, today's generation vs expected
+      (with delta), active risk count (+ watch/healthy breakdown), tomorrow's
+      forecast, revenue at risk — 5 cards, color-toned (green/amber/red) by
+      severity
+- [x] Daily generation trend chart (`DailyTrendChart.tsx`, Recharts) — actual
+      vs expected lines, updates live with the scrubber
+- [x] **Bug found & fixed (dark-mode collision):** create-next-app's
+      boilerplate `globals.css` auto-switches to a dark background on
+      `prefers-color-scheme: dark`, which collided with the light-themed KPI
+      cards — page headings were nearly invisible against a black background.
+      Fixed by making the light theme deliberate (removed the automatic dark
+      variant) rather than inheriting an accidental one; real dark-mode
+      support can be designed properly later if wanted.
+- [x] **Bug found & fixed (Recharts + live replay):** the chart's default
+      line-draw entrance animation (~1.5s) collides with the scrubber's 1s
+      auto-advance during Play — every tick re-triggered the animation, so
+      the chart never looked "settled" and flickered a partial line during
+      any rapid scrubbing/Play use. Fixed with `isAnimationActive={false}`.
+      Root-caused by testing the actual Play interaction, not just a static
+      screenshot — a static check would have missed this.
+- [x] Verified in-browser: scrubbing to an early date correctly shows a
+      shorter trend line, fewer flagged inverters, and a real (non-null)
+      tomorrow's-forecast number; Play advances smoothly with the fix; no
+      real console errors (only harmless HMR websocket noise from the
+      sandboxed preview environment)
 
 ## Phase 6 — Frontend: Maintenance Queue page
 
