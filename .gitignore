@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node / Next.js
+node_modules/
+.next/
+
+# Raw Kaggle data — not redistributed, download separately
+webapp/backend/data/raw/*.csv
