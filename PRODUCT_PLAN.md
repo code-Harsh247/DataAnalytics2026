@@ -164,13 +164,29 @@ still genuinely useful. State this plainly in the UI copy, not just here.
       real console errors (only harmless HMR websocket noise from the
       sandboxed preview environment)
 
-## Phase 6 — Frontend: Maintenance Queue page
+## Phase 6 — Frontend: Maintenance Queue page  ✅
 
-- [ ] Inverter list, status badges (healthy/watch/at-risk), sortable by risk
-- [ ] Detail view: residual-vs-irradiance chart, plain-language diagnosis
-      (reusing the bimodal-pattern insight — "pattern suggests intermittent
-      tripping under high load" vs "steady degradation"), trend chart,
-      estimated $ impact
+- [x] Inverter list (`/maintenance`) — status badges (healthy/watch/at_risk),
+      trend badges, sorted by risk (backend already returns z-score sorted)
+- [x] Detail view (`/maintenance/[sourceKey]`) — residual-vs-irradiance
+      scatter chart, daily severity trend chart, stat cards (mean deviation,
+      z-score, est. kWh/revenue lost), plain-language diagnosis
+- [x] Diagnosis text (`lib/diagnosis.ts`) is rule-based off status + trend +
+      projected_days_to_critical — explicitly not a stronger claim than the
+      numbers already shown elsewhere (consistent with the Phase 3 honesty
+      framing), 6 message variants covering the status x trend combinations
+- [x] **Backend refactor along the way**: `inverter_detail` didn't originally
+      return status/z_score (only `inverter_summary` did) — needed for the
+      diagnosis text, so extracted a shared `_inverter_row()` helper so both
+      endpoints compute status/trend identically rather than duplicating logic
+- [x] Added `NavBar` (Overview / Maintenance) to the root layout, verified
+      routing works both directions
+- [x] Verified in-browser end-to-end: queue list shows correct counts/sort;
+      clicked into the "worsening but currently healthy" inverter found in
+      Phase 3 (`V94E5Ben1TlhnDV`) — diagnosis text, stats, and both charts all
+      render correctly and the plain-language warning reads exactly as
+      intended (see PRODUCT_PLAN.md Phase 3 for why this finding matters);
+      no real console errors
 
 ## Phase 7 — Frontend: Forecast page
 

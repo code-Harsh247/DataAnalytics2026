@@ -107,46 +107,61 @@ def inverter_summary(plant: int, as_of: pd.Timestamp) -> list[dict]:
 
     rows = []
     for source_key, grp in by_inv:
-        mean_residual = grp["RESIDUAL"].mean()
-        z = (mean_residual - means.mean()) / std
-        loss_kwh = grp["RESIDUAL"].clip(upper=0).abs().sum() * INTERVAL_HOURS / 1000
-        status = "at_risk" if z < -1.5 else ("watch" if z < -1.0 else "healthy")
-        trend_info = _classify_trend(_daily_severity(grp))
-        rows.append({
-            "source_key": source_key,
-            "status": status,
-            "mean_residual": round(float(mean_residual), 2),
-            "z_score": round(float(z), 2),
-            "est_kwh_lost": round(float(loss_kwh), 2),
-            "est_revenue_lost": round(float(loss_kwh * TARIFF_PER_KWH), 2),
-            "trend": trend_info["trend"],
-            "projected_days_to_critical": trend_info["projected_days_to_critical"],
-        })
+        rows.append(_inverter_row(source_key, grp, means, std))
     rows.sort(key=lambda r: r["z_score"])
     return rows
 
 
+def _status_from_z(z: float) -> str:
+    return "at_risk" if z < -1.5 else ("watch" if z < -1.0 else "healthy")
+
+
+def _inverter_row(source_key: str, grp: pd.DataFrame, means: pd.Series, std: float) -> dict:
+    mean_residual = grp["RESIDUAL"].mean()
+    z = (mean_residual - means.mean()) / std
+    loss_kwh = grp["RESIDUAL"].clip(upper=0).abs().sum() * INTERVAL_HOURS / 1000
+    trend_info = _classify_trend(_daily_severity(grp))
+    return {
+        "source_key": source_key,
+        "status": _status_from_z(z),
+        "mean_residual": round(float(mean_residual), 2),
+        "z_score": round(float(z), 2),
+        "est_kwh_lost": round(float(loss_kwh), 2),
+        "est_revenue_lost": round(float(loss_kwh * TARIFF_PER_KWH), 2),
+        "trend": trend_info["trend"],
+        "projected_days_to_critical": trend_info["projected_days_to_critical"],
+    }
+
+
 def inverter_detail(plant: int, source_key: str, as_of: pd.Timestamp) -> dict:
-    df = _as_of_filter(get_residual_data(plant), as_of)
-    df = df[df["SOURCE_KEY"] == source_key]
+    all_df = _as_of_filter(get_residual_data(plant), as_of)
+    df = all_df[all_df["SOURCE_KEY"] == source_key]
     if df.empty:
         return {"source_key": source_key, "points": [], "daily_severity": [],
+                "status": None, "mean_residual": None, "z_score": None,
+                "est_kwh_lost": None, "est_revenue_lost": None,
                 "trend": "insufficient_data", "slope_per_day": None, "p_value": None,
                 "projected_days_to_critical": None}
+
+    means = all_df.groupby("SOURCE_KEY")["RESIDUAL"].mean()
+    std = means.std() or 1.0
+    summary_row = _inverter_row(source_key, df, means, std)
 
     points = [
         {"irradiation": round(float(r.IRRADIATION), 4), "residual": round(float(r.RESIDUAL), 2)}
         for r in df.itertuples()
     ]
-
     daily_severity = _daily_severity(df)
     trend_info = _classify_trend(daily_severity)
 
     return {
-        "source_key": source_key,
+        **summary_row,
+        "trend": trend_info["trend"],
+        "projected_days_to_critical": trend_info["projected_days_to_critical"],
+        "slope_per_day": trend_info["slope_per_day"],
+        "p_value": trend_info["p_value"],
         "points": points,
         "daily_severity": daily_severity,
-        **trend_info,
     }
 
 

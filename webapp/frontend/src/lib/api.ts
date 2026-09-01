@@ -56,6 +56,11 @@ export interface DailySeverityPoint {
 
 export interface InverterDetail {
   source_key: string;
+  status: InverterStatus | null;
+  mean_residual: number | null;
+  z_score: number | null;
+  est_kwh_lost: number | null;
+  est_revenue_lost: number | null;
   points: ResidualPoint[];
   daily_severity: DailySeverityPoint[];
   trend: Trend;
