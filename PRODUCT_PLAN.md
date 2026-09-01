@@ -209,13 +209,47 @@ still genuinely useful. State this plainly in the UI copy, not just here.
       range, and the isolated green dot rendering correctly on the chart; no
       console errors at all this time
 
-## Phase 8 — Polish
+## Phase 8 — Polish  ✅
 
-- [ ] Styling/branding pass, responsive layout
-- [ ] Plain-language copywriting pass — translate stats into owner-facing
-      language throughout, not just in one panel
-- [ ] Empty/edge-case states (e.g. scrubber at day 1, no history yet for
-      trend scoring)
+- [x] Copywriting pass on the inverter detail page: removed raw `z_score` and
+      `p_value`/`slope` from the primary stat cards (meaningless to a plant
+      owner), renamed "Mean deviation" → "Avg. output vs expected" with units
+      and red/green coloring, demoted the statistical detail to a small muted
+      footnote line for anyone who wants it. Same rename + units + color
+      applied to the Maintenance Queue list's column.
+- [x] **Real bug found via day-1 edge-case testing, not hypothetically**: the
+      diagnosis text for `insufficient_data` trend fell through to the
+      "stable" branch's language ("Consistently... underperforming"), which
+      overclaims — a single day of data isn't "consistent" anything. Fixed
+      with an explicit `insufficient_data` branch that's honest about not
+      having enough history yet ("not enough history yet to tell whether
+      this is a persistent issue or normal early variation")
+- [x] **Real bug found via mobile testing, not hypothetically**: the
+      Maintenance Queue table's `overflow-hidden` wrapper was silently
+      clipping the last two columns off-screen on mobile with no way to
+      access them — not just visually cramped, actually inaccessible data.
+      Fixed with `overflow-x-auto` + `min-w` so it scrolls instead of
+      clipping; verified scrollable via `scrollWidth > clientWidth` check,
+      not just a screenshot
+- [x] **Real bug found via mobile testing**: the nav bar's "Solar Plant
+      Manager" brand text wrapped across 3 lines next to the nav links on
+      a 375px viewport. Fixed by hiding the brand text below `sm:` — the nav
+      links are what matters for actual use
+- [x] Verified in-browser at mobile width (375x812) across all 4 pages
+      (Overview, Maintenance list, Maintenance detail, Forecast) — KPI card
+      grids, charts (ResponsiveContainer), and stat card grids all reflow
+      correctly; only the two bugs above needed fixing
+- [x] Verified day-1 (minimal-data) edge case across all pages: Command
+      Center chart renders a single point without crashing, Forecast
+      correctly shows "No data yet" (genuinely not enough training data yet,
+      not a bug), Maintenance Queue trend badges show "—" for
+      insufficient_data rather than a misleading trend claim
+- [x] Confirmed zero real console errors throughout (only harmless HMR
+      websocket noise from the sandboxed preview environment, not present in
+      a normal dev setup)
+- [ ] Not done (documented, not silently skipped): custom favicon/logo —
+      still the default Next.js icon. Minor, cosmetic, low priority relative
+      to the functional/UX fixes above.
 
 ## Phase 9 — Deployment (optional, only if time remains)
 

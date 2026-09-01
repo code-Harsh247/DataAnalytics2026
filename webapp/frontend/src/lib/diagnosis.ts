@@ -9,6 +9,12 @@ export function getDiagnosis(
   trend: Trend,
   projectedDays: number | null,
 ): string {
+  if (trend === "insufficient_data") {
+    return status === "healthy"
+      ? "Performing as expected so far, but not enough history yet to assess a trend."
+      : "Below expected output so far, but not enough history yet to tell whether this is a persistent issue or normal early variation.";
+  }
+
   if (status === "healthy") {
     if (trend === "worsening") {
       return projectedDays !== null
