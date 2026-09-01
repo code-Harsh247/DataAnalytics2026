@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { PlantProvider } from "@/context/PlantContext";
-import { WeatherIngestion } from "@/components/WeatherIngestion";
+import { SimulationIngestion } from "@/components/SimulationIngestion";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,7 +29,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col bg-gray-50">
         <AuthProvider>
           <PlantProvider>
-            <WeatherIngestion />
+            <SimulationIngestion />
             {children}
           </PlantProvider>
         </AuthProvider>

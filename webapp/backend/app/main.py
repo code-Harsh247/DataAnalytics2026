@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import fault_model, forecast_model, overview, weather
+from . import synthetic_generation
 from .data import load_plant
 
 app = FastAPI(title="Solar Plant Manager API")
@@ -83,3 +84,8 @@ def get_current_weather(lat: float, lon: float):
         return weather.get_current_conditions(lat, lon)
     except requests.RequestException as e:
         raise HTTPException(502, f"Weather provider error: {e}")
+
+
+@app.post("/api/synthetic/generate")
+def generate_synthetic_readings(req: synthetic_generation.GenerateRequest):
+    return synthetic_generation.generate(req)

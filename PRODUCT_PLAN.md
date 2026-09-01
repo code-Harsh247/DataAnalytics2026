@@ -430,3 +430,93 @@ only, no UI yet.
 physical model → fake-but-grounded power readings) — that's the deferred
 "hardware part" from the brainstorm, a separate next step. Also not done:
 real scheduled ingestion independent of a browser tab being open.
+
+## Phase 13 — Synthetic Panel-Output Generation  ✅
+
+The deferred "hardware part": since there's no real inverter hardware,
+there are no real power readings, but the numbers can still be grounded in
+real physics (the real weather from Phase 12 + a standard PV performance
+model) rather than made up outright. Full design in the approved plan at
+the time (`~/.claude/plans/okay-i-want-to-resilient-church.md`); summary
+here.
+
+**Decisions from brainstorm**: fault injection is stateful (persists a
+realistic multi-hour window, tracked in the DB) rather than re-rolled every
+tick; virtual inverters are proper DB entities (an `inverters` table), not
+just derived labels.
+
+**Physical model** (`app/synthetic_generation.py`, sibling to `weather.py`):
+1. Plane-of-array irradiance via `pvlib.irradiance.get_total_irradiance`,
+   using the plant's actual `tilt_degrees`/`azimuth_degrees` — the first
+   real use for those two Tier 2 onboarding fields (previously stored,
+   unused)
+2. Cell temperature via a standard NOCT model
+3. DC power: `capacity_kw × (POA/1000) × (1 + temp_coeff×(cell_temp−25))`,
+   temp_coeff ≈ −0.4%/°C — the same physical relationship the *original
+   Kaggle-data analysis* found empirically (module temp was a strong
+   predictor of underperformance there too)
+4. AC power: DC × 97% inverter efficiency
+
+**Fallback chain for optional setup fields** (`resolvePlantDefaults` in
+`lib/generation.ts`): `capacity_kw` derived from `panel_count ×
+module_wattage_w` if both given, else a 5kW small-system default;
+`tilt_degrees` defaults to site latitude (standard fixed-tilt convention);
+`azimuth_degrees` defaults to 180° (south-facing) in the northern
+hemisphere or 0° (north-facing) in the southern — real design convention,
+not an arbitrary guess; `inverter_count` defaults to 4.
+
+**Multi-inverter + fault modeling**:
+- `webapp/supabase/003_generation.sql` — `inverters` (persistent
+  `base_efficiency_factor` per inverter, ~0.96-1.02 spread, assigned once
+  at creation so healthy variance is stable over time, not re-randomized
+  every tick), `inverter_faults` (stateful episodes: `severity` +
+  `[started_at, ends_at)` window, no explicit "closing" needed — a fault
+  just stops applying once `ends_at` passes), `generation_readings`. RLS on
+  the two-levels-removed tables (`inverter_faults`, `generation_readings`)
+  checks ownership via a join through `inverters` → `plants.user_id`.
+- `lib/generation.ts`: `getOrCreateInverters` lazily provisions an
+  plant's inverters on first tick (using the resolved `inverterCount`
+  default/input); each tick, currently-fault-free inverters get a ~4%
+  chance of starting a new 2-8 hour fault episode (severity 15-50%)
+
+**Orchestration**: renamed `WeatherIngestion.tsx` → `SimulationIngestion.tsx`
+— now chains weather-fetch → weather-store → generation-compute →
+generation-store in one tick, so a single tick produces one physically
+consistent weather+generation snapshot instead of two independently-timed
+fetches that could drift apart. (Renaming an already-verified, committed
+component was a deliberate choice over adding a second independently-polling
+component, specifically to preserve that consistency guarantee.)
+
+**Verified thoroughly, including hand-checking the physics**:
+- Backend endpoint tested directly: manually verified the POA transposition,
+  NOCT cell-temp formula, and per-inverter efficiency/fault multipliers all
+  compute to the exact expected values by hand, for both a daytime case
+  (real Auckland weather) and a nighttime case (zero irradiance in Pune —
+  confirmed zero power, cell temp correctly equals ambient with no solar
+  heating, no divide-by-zero or negative-power bugs)
+- Frontend compiles cleanly; confirmed the component rename didn't break
+  anything after a transient Turbopack cache issue (cleared `.next`,
+  confirmed clean via direct DOM/state inspection rather than trusting a
+  console-log buffer that turned out to hold stale entries from before the
+  rename)
+- End-to-end against the real Supabase project: first tick correctly
+  lazy-created 4 inverters (`inverter_count` was left blank at setup, so
+  the default applied) with real distinct efficiency values; a matching
+  generation reading landed for each, correctly showing zero output since
+  it's genuinely nighttime in Pune right now — not a bug, the honest
+  correct answer for that time of day
+- RLS confirmed on all three new tables (anon-only queries return nothing)
+- Dedup confirmed: a second tick left inverter count and reading count
+  unchanged rather than duplicating
+- **Fault-injection wiring specifically verified** (hadn't organically
+  triggered yet in just two ticks — ~4% per inverter per tick): manually
+  inserted a fault row, then independently replicated the app's exact
+  active-fault detection query and confirmed it correctly found the fault —
+  combined with the earlier hand-verified severity math, this confirms the
+  full fault path end-to-end without needing to wait for the random trigger
+
+**Explicitly not done yet**: actually running this synthetic data through
+the fault-detection/forecasting models built for the Plant 1/2 demo — that
+needs enough accumulated history first, a real next step once ingestion has
+been running a while. Also not done: real scheduled ingestion (same known
+limitation as Phase 12).
