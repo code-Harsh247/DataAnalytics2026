@@ -12,6 +12,7 @@ model was fit on.
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import KFold, cross_val_predict
 
@@ -21,6 +22,55 @@ from .solar_features import add_solar_features
 FEATURES = ["IRRADIATION", "AMBIENT_TEMPERATURE", "MODULE_TEMPERATURE", "SOLAR_ELEVATION"]
 TARIFF_PER_KWH = 4.0  # assumed, illustrative — not a real published tariff
 INTERVAL_HOURS = 0.25
+
+# Trend-based risk scoring (Phase 3). NOT true predictive maintenance — this
+# dataset has no historical failure/repair labels to learn from. Instead this
+# extrapolates a inverter's *recent anomaly-severity trend*, and is honest
+# about it: empirically, Plant 2's flagged inverters show weak, mostly
+# insignificant slopes (correlation 0.03-0.21 over the 34-day window) — i.e.
+# chronic, stable underperformance, NOT a worsening trend. The threshold below
+# is deliberately lenient (p<0.10, not the usual 0.05) given only ~34 points,
+# and even so most inverters classify as "stable" rather than "worsening" —
+# that's the honest result, not a bug to tune away.
+TREND_P_THRESHOLD = 0.10
+TREND_SLOPE_THRESHOLD = 5.0  # minimum |slope| (residual/day) to call it a real trend, not noise
+CRITICAL_RESIDUAL = -300.0  # illustrative severity threshold for a projected inspection window
+
+
+def _classify_trend(daily_severity: list[dict]) -> dict:
+    if len(daily_severity) < 5:
+        return {"trend": "insufficient_data", "slope_per_day": None, "p_value": None,
+                "projected_days_to_critical": None}
+
+    y = np.array([d["mean_residual"] for d in daily_severity])
+    x = np.arange(len(y))
+    slope, intercept, r, p, se = stats.linregress(x, y)
+
+    if p < TREND_P_THRESHOLD and slope < -TREND_SLOPE_THRESHOLD:
+        trend = "worsening"
+    elif p < TREND_P_THRESHOLD and slope > TREND_SLOPE_THRESHOLD:
+        trend = "improving"
+    else:
+        trend = "stable"
+
+    projected_days = None
+    if trend == "worsening" and y[-1] > CRITICAL_RESIDUAL:
+        projected_days = round(float((CRITICAL_RESIDUAL - y[-1]) / slope))
+
+    return {
+        "trend": trend,
+        "slope_per_day": round(float(slope), 2),
+        "p_value": round(float(p), 3),
+        "projected_days_to_critical": projected_days,
+    }
+
+
+def _daily_severity(grp: pd.DataFrame) -> list[dict]:
+    daily = grp.groupby(grp["DATE_TIME"].dt.date)["RESIDUAL"].mean().reset_index()
+    daily.columns = ["date", "mean_residual"]
+    daily["date"] = daily["date"].astype(str)
+    daily["mean_residual"] = daily["mean_residual"].round(2)
+    return daily.to_dict("records")
 
 _cache: dict[int, pd.DataFrame] = {}
 
@@ -61,6 +111,7 @@ def inverter_summary(plant: int, as_of: pd.Timestamp) -> list[dict]:
         z = (mean_residual - means.mean()) / std
         loss_kwh = grp["RESIDUAL"].clip(upper=0).abs().sum() * INTERVAL_HOURS / 1000
         status = "at_risk" if z < -1.5 else ("watch" if z < -1.0 else "healthy")
+        trend_info = _classify_trend(_daily_severity(grp))
         rows.append({
             "source_key": source_key,
             "status": status,
@@ -68,6 +119,8 @@ def inverter_summary(plant: int, as_of: pd.Timestamp) -> list[dict]:
             "z_score": round(float(z), 2),
             "est_kwh_lost": round(float(loss_kwh), 2),
             "est_revenue_lost": round(float(loss_kwh * TARIFF_PER_KWH), 2),
+            "trend": trend_info["trend"],
+            "projected_days_to_critical": trend_info["projected_days_to_critical"],
         })
     rows.sort(key=lambda r: r["z_score"])
     return rows
@@ -77,22 +130,23 @@ def inverter_detail(plant: int, source_key: str, as_of: pd.Timestamp) -> dict:
     df = _as_of_filter(get_residual_data(plant), as_of)
     df = df[df["SOURCE_KEY"] == source_key]
     if df.empty:
-        return {"source_key": source_key, "points": [], "daily_severity": []}
+        return {"source_key": source_key, "points": [], "daily_severity": [],
+                "trend": "insufficient_data", "slope_per_day": None, "p_value": None,
+                "projected_days_to_critical": None}
 
     points = [
         {"irradiation": round(float(r.IRRADIATION), 4), "residual": round(float(r.RESIDUAL), 2)}
         for r in df.itertuples()
     ]
 
-    daily = df.groupby(df["DATE_TIME"].dt.date)["RESIDUAL"].mean().reset_index()
-    daily.columns = ["date", "mean_residual"]
-    daily["date"] = daily["date"].astype(str)
-    daily["mean_residual"] = daily["mean_residual"].round(2)
+    daily_severity = _daily_severity(df)
+    trend_info = _classify_trend(daily_severity)
 
     return {
         "source_key": source_key,
         "points": points,
-        "daily_severity": daily.to_dict("records"),
+        "daily_severity": daily_severity,
+        **trend_info,
     }
 
 

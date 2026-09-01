@@ -84,18 +84,33 @@ still genuinely useful. State this plainly in the UI copy, not just here.
       chasing a "fix that isn't taking effect." Resolution: stop/restart the
       server fully rather than trust `--reload` after a burst of rapid edits.
 
-## Phase 3 — Backend: Trend-based risk scoring (new logic, not yet built)
+## Phase 3 — Backend: Trend-based risk scoring  ✅
 
-- [ ] Aggregate per-timestamp residuals to a daily severity score per inverter
-- [ ] **Empirical check before committing to UI framing:** does Plant 2's
-      anomaly severity actually trend (worsening/improving) over the 34 days,
-      or stay roughly flat? If flat, the UI should say "consistently
-      underperforming," not force a countdown that isn't supported by the
-      data. Check this before Phase 6.
-- [ ] Implement trend classification (worsening / stable / improving) and,
-      where a worsening trend is real, a rough projected inspection window
-- [ ] Document the finding either way — this is exactly the kind of honest
-      negative/positive result that made `tasks.md` credible
+- [x] Aggregate per-timestamp residuals to a daily severity score per inverter
+      (`_daily_severity()` in `fault_model.py`)
+- [x] **Empirical check, done before committing to UI framing:** fit a linear
+      trend to each Plant 2 inverter's daily severity. Result — the three
+      flagged (`at_risk`) inverters all show weak correlation (0.03-0.21) and
+      classify as **stable**, not worsening: chronic, consistent
+      underperformance, not degradation-over-time. Confirms the UI should say
+      "consistently underperforming," not force a countdown for those three.
+- [x] Implemented trend classification (worsening / stable / improving) via
+      `scipy.stats.linregress` per inverter, p<0.10 threshold (deliberately
+      lenient given only ~34 points) plus a minimum slope magnitude so tiny
+      but "significant" slopes don't get over-called
+- [x] **Validated the classifier isn't a constant-output bug**: across all 22
+      Plant 2 inverters, got a real mix — 18 stable, 2 improving, 2 worsening
+      — so it's demonstrably capable of detecting a real trend, not just
+      defaulting to "stable"
+- [x] **Genuinely interesting finding, not planned for:** the 2 "worsening"
+      inverters (`V94E5Ben1TlhnDV`, `oZ35aAeoifZaQzV`) are currently classified
+      `healthy` by the static z-score check — trend scoring catches an early
+      warning (p=0.014, projected ~49-63 days to a critical residual
+      threshold) that the static status alone would completely miss. This is
+      the actual product value of Phase 3, more than the flagged-inverter
+      countdown I originally expected.
+- [x] Wired into both `inverter_summary` (queue list) and `inverter_detail`
+      (per-inverter page) — verified via curl against the running API
 
 ## Phase 4 — Frontend: Scaffold & data layer
 
