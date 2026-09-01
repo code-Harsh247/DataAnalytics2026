@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Raw Kaggle data — not redistributed, see README for download instructions
+data/raw/*.csv
