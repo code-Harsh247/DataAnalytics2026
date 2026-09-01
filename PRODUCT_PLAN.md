@@ -256,3 +256,53 @@ still genuinely useful. State this plainly in the UI copy, not just here.
 - [ ] Backend: Railway/Render/Fly.io
 - [ ] Frontend: Vercel
 - [ ] Wire production API URL, verify CORS in production
+
+## Phase 10 — Authentication (Supabase)  ✅
+
+Added after the original 9 phases, as part of designing the onboarding flow.
+Real accounts (not cosmetic personalization) — user set up a Supabase
+project and provided the URL + anon key (anon key is designed to be public/
+client-safe per Supabase's own docs; protection is via Row Level Security,
+not key secrecy — safe to use directly, unlike a `service_role` key).
+
+**Scope decision**: frontend-only auth for now. The FastAPI backend stays
+as-is (no JWT verification) since real per-user plant data ("data
+connection") is explicitly deferred — backend auth should be designed
+together with that, not bolted on separately now.
+
+- [x] `npm install @supabase/supabase-js`; credentials in `.env.local`
+      (gitignored by create-next-app's default `.env*` rule)
+- [x] `lib/supabase.ts` — client singleton
+- [x] `context/AuthContext.tsx` — session state via `onAuthStateChange`,
+      `signUp`/`signIn`/`signOut` methods
+- [x] `components/AuthGate.tsx` — redirects to `/login` when unauthenticated
+- [x] **Restructured routing** into a `(dashboard)` route group so protected
+      pages (Overview/Maintenance/Forecast) share `AuthGate` + `SimulationProvider`
+      + `NavBar` + `TimelineScrubber`, while `/login` shares only the root
+      layout (fonts + `AuthProvider`) — no scrubber/nav on the login screen
+- [x] `/login` page combines welcome/value-prop copy with a sign in/up toggle
+      form (per the "no separate tour" decision — one screen, not three)
+- [x] Sign-out added to `NavBar`
+- [x] **Verified against the real Supabase project, not mocked:**
+  - Unauthenticated access to `/` and directly to `/maintenance` both
+    correctly redirect to `/login`
+  - Sign-up with `@example.com` correctly rejected by Supabase (blocks
+    known-fake/reserved domains) — real validation, real error surfaced
+  - Sign-up with a real-format address succeeds, correctly shows "check your
+    email" (Supabase requires email confirmation by default — no session
+    issued yet)
+  - Sign-in attempt on that unconfirmed account correctly blocked with
+    "Email not confirmed"
+  - Two legitimate 400s in the network log (the two rejected requests
+    above) — not bugs, expected responses for intentionally-invalid test
+    inputs
+- [ ] **Not fully verified**: the confirmed-session → dashboard path, since
+      completing it requires clicking a real confirmation-email link, which
+      needs the account owner. Everything up to that point (signup, error
+      handling, redirect gating) is confirmed working; the remaining link is
+      the email-confirm step itself plus the post-confirm sign-in redirect —
+      should be tested once you've clicked the confirmation link.
+- [ ] Worth deciding: Supabase's "Confirm email" requirement adds friction
+      for demo/portfolio use — could disable it in Supabase's dashboard
+      (Authentication → Providers → Email) if faster iteration matters more
+      than the (minimal, for a demo) security value here.

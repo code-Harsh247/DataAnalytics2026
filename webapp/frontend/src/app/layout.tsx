@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { SimulationProvider } from "@/context/SimulationContext";
-import { TimelineScrubber } from "@/components/TimelineScrubber";
-import { NavBar } from "@/components/NavBar";
+import { AuthProvider } from "@/context/AuthContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,11 +25,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-gray-50">
-        <SimulationProvider>
-          <NavBar />
-          <TimelineScrubber />
-          <main className="flex-1">{children}</main>
-        </SimulationProvider>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );
