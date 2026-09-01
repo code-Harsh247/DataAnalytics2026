@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { usePlant } from "@/context/PlantContext";
 import { createPlant, type NewPlant } from "@/lib/plants";
+import { PlantDashboardView } from "@/components/PlantDashboardView";
 
 const MODULE_TYPES = ["Monocrystalline", "Polycrystalline", "Thin-film", "Other"];
 
@@ -91,20 +92,19 @@ export default function SetupPlantPage() {
     return <div className="p-6 text-gray-500">Loading…</div>;
   }
 
-  if (plant || justCreated) {
+  if (plant) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-        <div className="max-w-md text-center space-y-3">
-          <h1 className="text-xl font-semibold text-gray-900">
-            {plant?.name ?? form.name} is configured
-          </h1>
-          <p className="text-sm text-gray-500">
-            Live monitoring isn&apos;t connected yet — that&apos;s a separate step we&apos;ll set up
-            later. We&apos;ll let you know when your dashboard is ready.
-          </p>
-        </div>
+      <div className="min-h-screen bg-gray-50">
+        <PlantDashboardView plant={plant} />
       </div>
     );
+  }
+
+  if (justCreated) {
+    // Brief transitional state -- refetch() is awaited before justCreated is
+    // set, so `plant` should already be populated by the time we get here;
+    // this only covers the instant before that render lands.
+    return <div className="p-6 text-gray-500">Loading your plant…</div>;
   }
 
   return (

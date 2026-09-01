@@ -577,3 +577,46 @@ direct backend physics tests (layer 1) exercised real daylight conditions.
 The orchestration and math are independently proven correct; seeing them
 combine into a non-zero number live would need either a daytime plant or
 waiting for one.
+
+## Phase 15 — Real-Plant Dashboard  ✅
+
+Closes the biggest visible gap from Phases 10-14: a user could sign up,
+configure a plant, and watch data silently accumulate in Supabase forever
+with nothing to look at — `/setup-plant` just showed a static "coming
+soon" message once a plant existed. This phase makes that data visible.
+
+**Deliberately deferred, per explicit decision**: the ML/data-analytics
+layer (expected-power model, anomaly detection, forecasting) discussed
+separately — this phase is pure data visualization pulled directly from
+Supabase, no backend compute involved. That decision (deterministic
+baseline vs. trained ML, plus a historical-backfill idea to get enough
+data for real training/validation against known synthetic fault labels)
+is parked for later, not abandoned.
+
+**Where it lives**: extended `/setup-plant`'s "already configured" branch
+— previously static text, now renders `PlantDashboardView` when a plant
+exists. Kept as the same route rather than adding a new one to avoid
+churn; still a reasonable place for "your plant's page" conceptually.
+Deliberately separate from the (dashboard) route group, which still shows
+the unrelated Plant 1/2 historical demo (per the earlier explicit decision
+not to connect a new plant to that dataset).
+
+**Built** (`lib/plantDashboard.ts`, `components/PlantDashboardView.tsx` +
+two new chart components):
+- KPI cards: energy-to-date and revenue-to-date (summed client-side over
+  all readings — fine at current data volume, would need a real aggregate
+  query or materialized view at scale, not attempted here), active fault
+  count, latest weather conditions
+- Two history charts (real GHI over time, total plant AC power over time —
+  summed across inverters per timestamp)
+- Per-inverter status table (latest reading, fault status, timestamp)
+- A low-data notice when fewer than 5 readings exist yet, rather than
+  silently showing sparse/empty-looking charts with no explanation
+
+**Verified against the real Supabase project, live, not mocked**: loaded
+the actual dashboard for the real test plant and confirmed every number
+matches what direct REST queries showed in earlier phases (1/4 active
+faults — the manually-inserted test fault from Phase 13, still correctly
+showing as active; 0 kWh/revenue — correct for all-nighttime data so far).
+Reloaded and confirmed a **genuinely new tick** (22:00 UTC) appeared
+automatically, proving this reads live data, not a cached snapshot.
