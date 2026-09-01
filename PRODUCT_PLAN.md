@@ -306,3 +306,58 @@ together with that, not bolted on separately now.
       for demo/portfolio use — could disable it in Supabase's dashboard
       (Authentication → Providers → Email) if faster iteration matters more
       than the (minimal, for a demo) security value here.
+
+## Phase 11 — Plant Setup (Onboarding Step 2)  🚧 in progress
+
+After signup, a logged-in user with no configured plant is sent to
+`/setup-plant` before the dashboard is reachable at all.
+
+**Field design — split into two tiers, decided in brainstorm**:
+- **Tier 1 (actually wired to computation)**: plant name, latitude/longitude,
+  electricity tariff. Location was previously hardcoded in
+  `solar_features.py` (18N/80E) and tariff in `fault_model.py`
+  (`TARIFF_PER_KWH = 4.0`) — this is the first step toward making those
+  real per-plant inputs instead of constants (not yet wired into the
+  backend itself — see open item below).
+- **Tier 2 (realistic, decorative until data connection exists)**: capacity
+  (kW), panel count, inverter count, module type, module wattage, tilt,
+  azimuth, commissioning date, area — collected in full per user's choice,
+  stored for future use, explicitly not read by any computation yet.
+
+**Scope decisions from brainstorm**:
+- Location entered as plain lat/lon number fields (no geocoding/map picker)
+- Full Tier 2 field set collected now, not deferred
+- The newly configured plant is explicitly NOT connected to the Plant 2 demo
+  dataset — user wants to test that wiring later, separately
+- Post-setup lands on a plain confirmation screen ("configured, live
+  monitoring coming soon"), not the dashboard
+
+**Built**:
+- [x] `webapp/supabase/001_plants.sql` — `plants` table + RLS policies
+      (each user sees only their own row via `auth.uid() = user_id`) — user
+      needs to run this in the Supabase SQL Editor (no admin access from
+      the app, only the client-safe anon key)
+- [x] `lib/plants.ts` — `getMyPlant()` / `createPlant()` against Supabase
+- [x] `context/PlantContext.tsx` — loads the current user's plant once
+      authenticated, exposes `plant`/`loading`/`refetch`
+- [x] `AuthGate` extended: authenticated + no plant → redirect to
+      `/setup-plant` (previously: authenticated was the only check)
+- [x] `/setup-plant` form — required Tier 1 fields with validation
+      (lat -90..90, lon -180..180), optional Tier 2 fields in a separate
+      "(optional)" section, shows a confirmation state instead of the form
+      if a plant already exists (prevents accidental duplicate rows — no
+      DB uniqueness constraint added, relies on this client-side check)
+- [x] Verified: unauthenticated access to `/setup-plant` redirects to
+      `/login`; page compiles with no console errors beyond the known
+      harmless HMR noise
+
+**Blocked on**: testing the actual form submission end-to-end requires an
+authenticated session, which requires either clicking the pending Supabase
+confirmation email, or disabling "Confirm email" in the Supabase dashboard.
+Also blocked on the `plants` table not existing yet until the SQL migration
+is run.
+
+**Explicitly not done yet**: wiring the backend to actually use a plant's
+stored lat/lon/tariff instead of the hardcoded constants — that's a
+FastAPI change (accept plant params, or look them up) that makes sense to
+do once there's a real per-user data flow to attach it to, not before.
