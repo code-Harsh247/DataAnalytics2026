@@ -520,3 +520,60 @@ the fault-detection/forecasting models built for the Plant 1/2 demo — that
 needs enough accumulated history first, a real next step once ingestion has
 been running a while. Also not done: real scheduled ingestion (same known
 limitation as Phase 12).
+
+## Phase 14 — Wire Up the Remaining Unused Setup Fields  ✅
+
+Prompted by directly auditing which of the plant-setup fields actually drove
+computation vs. were just stored. Answer at the time: `module_type`,
+`commissioning_date`, `area_sqm`, and `tariff_per_kwh` were all collected
+but never read anywhere. This phase makes each one genuinely load-bearing.
+
+**`module_type` → real temperature coefficient**: replaced the single fixed
+`TEMP_COEFFICIENT` constant in `synthetic_generation.py` with a per-plant
+value resolved from a lookup table in `lib/generation.ts`
+(Monocrystalline −0.35%/°C, Polycrystalline −0.41%/°C, Thin-film −0.25%/°C —
+thin-film genuinely tolerates heat better in reality, this isn't an
+invented spread). Backend stays a pure calculator; the lookup lives in the
+frontend alongside the other config-resolution logic.
+
+**`commissioning_date` → panel degradation**: ~0.5%/year (standard for
+crystalline silicon), floored at 70% so an old/bad date can't zero out
+output. No date → no degradation applied (honest "unknown" rather than
+guessing an age).
+
+**`area_sqm` → third tier in the capacity fallback chain**: `capacity_kw`
+→ `panel_count × module_wattage_w` → `area_sqm × 150 W/m²` (installed-area
+density) → 5kW default. Also added a non-blocking plausibility check: if
+both capacity and area are given and imply wildly different values (>3x),
+logs a warning rather than silently accepting an inconsistent configuration.
+
+**`tariff_per_kwh` → real revenue per reading**: new `revenue_per_interval`
+column on `generation_readings` (`webapp/supabase/004_generation_revenue.sql`),
+computed as `ac_power_kw × 0.25h × tariff_per_kwh` at storage time.
+
+**Verified in three independent layers**:
+1. Backend physics, hand-checked via direct API calls: monocrystalline vs.
+   thin-film coefficients produce different power under identical hot-day
+   conditions (thin-film correctly higher, matching real-world behavior),
+   and a 0.9 degradation factor correctly scales output down by exactly 10%
+2. Frontend resolution logic verified by replicating `resolvePlantDefaults`
+   exactly in the browser console against the real (deliberately
+   reconfigured) test plant — capacity from area (50 sqm → 7.5kW), thin-film
+   coefficient, and a 3-year degradation factor (≈0.985) all matched
+   hand-calculated expected values exactly
+3. End-to-end against the real Supabase project: PATCHed the test plant to
+   exercise all three new paths at once (nulled `capacity_kw`/`panel_count`/
+   `module_wattage_w`, set `area_sqm`, `module_type`, `commissioning_date`),
+   triggered a real tick, confirmed a genuinely new row landed (not blocked
+   by dedup) with `revenue_per_interval: 0` correctly computed, while the
+   pre-migration rows correctly show `null` for that column (they predate
+   it, not a bug) — and confirmed the manually-inserted fault from Phase 13
+   is still being correctly detected and applied on this later tick too
+
+**Known limitation, stated plainly**: none of this was observed producing
+*non-zero* revenue/temp-coefficient/degradation effects through the live
+pipeline, since it's nighttime at the test plant's location — only the
+direct backend physics tests (layer 1) exercised real daylight conditions.
+The orchestration and math are independently proven correct; seeing them
+combine into a non-zero number live would need either a daytime plant or
+waiting for one.

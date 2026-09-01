@@ -15,7 +15,7 @@ import pandas as pd
 import pvlib
 from pydantic import BaseModel
 
-TEMP_COEFFICIENT = -0.004  # per degree C above 25C, typical crystalline silicon
+DEFAULT_TEMP_COEFFICIENT = -0.0038  # per degree C above 25C, typical crystalline silicon
 NOCT_C = 45.0  # Nominal Operating Cell Temperature, typical panel datasheet value
 INVERTER_EFFICIENCY = 0.97
 
@@ -45,9 +45,11 @@ def compute_poa_irradiance(
     return max(float(poa["poa_global"]), 0.0)
 
 
-def compute_dc_power_kw(capacity_kw: float, poa_irradiance_wm2: float, cell_temp_c: float) -> float:
+def compute_dc_power_kw(
+    capacity_kw: float, poa_irradiance_wm2: float, cell_temp_c: float, temp_coefficient: float,
+) -> float:
     return max(
-        capacity_kw * (poa_irradiance_wm2 / 1000.0) * (1 + TEMP_COEFFICIENT * (cell_temp_c - 25.0)),
+        capacity_kw * (poa_irradiance_wm2 / 1000.0) * (1 + temp_coefficient * (cell_temp_c - 25.0)),
         0.0,
     )
 
@@ -69,6 +71,12 @@ class GenerateRequest(BaseModel):
     dni_wm2: float
     dhi_wm2: float
     temperature_c: float
+    # Both resolved by the frontend from plant config (module_type lookup,
+    # commissioning_date age calc) -- see lib/generation.ts. Kept as plain
+    # numbers here so this module stays a pure calculator, not a place that
+    # also needs a module-type lookup table.
+    temp_coefficient: float = DEFAULT_TEMP_COEFFICIENT
+    degradation_factor: float = 1.0
     inverters: list[InverterState]
 
 
@@ -84,8 +92,8 @@ def generate(req: GenerateRequest) -> dict:
 
     readings = []
     for inv in req.inverters:
-        base_dc = compute_dc_power_kw(per_inverter_capacity, poa, cell_temp)
-        dc_power = base_dc * inv.base_efficiency_factor * (1 - inv.active_fault_severity)
+        base_dc = compute_dc_power_kw(per_inverter_capacity, poa, cell_temp, req.temp_coefficient)
+        dc_power = base_dc * req.degradation_factor * inv.base_efficiency_factor * (1 - inv.active_fault_severity)
         ac_power = dc_power * INVERTER_EFFICIENCY
         readings.append({
             "inverter_id": inv.id,
