@@ -17,8 +17,13 @@ export function PlantProvider({ children }: { children: React.ReactNode }) {
   const [plant, setPlant] = useState<Plant | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Keyed on the user id, not the session object: Supabase hands out a new
+  // session object on every token refresh (~hourly), and refetching on that
+  // flips `loading`, which unmounts the whole dashboard and wipes its state.
+  const userId = session?.user.id ?? null;
+
   const fetchPlant = useCallback(async () => {
-    if (!session) {
+    if (!userId) {
       setPlant(null);
       setLoading(false);
       return;
@@ -30,7 +35,7 @@ export function PlantProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [session]);
+  }, [userId]);
 
   useEffect(() => {
     if (authLoading) return;

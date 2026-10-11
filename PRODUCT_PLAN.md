@@ -854,23 +854,26 @@ Start with frontend/infra (no dependencies); switch to the model once item
 1 above is on `main`. If it isn't yet, generate the dataset yourself with
 the backfill command (same seed → same data) once `backfill.py` is pushed.
 
-- [ ] **Local setup**: backend venv (`python3 -m venv .venv &&
+- [x] **Local setup**: backend venv (`python3 -m venv .venv &&
       .venv/bin/pip install -r requirements.txt`), `npm install` in
       `webapp/frontend`, `.env.local` with `NEXT_PUBLIC_SUPABASE_URL` /
       `NEXT_PUBLIC_SUPABASE_ANON_KEY` (get from the Supabase dashboard →
       Project Settings → API) and `NEXT_PUBLIC_API_URL=http://localhost:8000`
-- [ ] **Supabase**: disable "Confirm email" (Authentication → Providers →
+- [x] **Supabase**: disable "Confirm email" (Authentication → Providers →
       Email). *Done when*: fresh sign-up → setup plant → dashboard works
       with no email step
 - [ ] **Model 3 — Gradient Boosting** (`app/models/gradient_boosting.py`,
       `HistGradientBoostingRegressor`): predict healthy `ac_power_kw` from
       weather features + inverter, flag on residual threshold.
       *Done when*: appears in `evaluate` output on the canonical dataset
-- [ ] **Mock + client**: `src/lib/mocks/analysis.json` (hand-written,
+- [x] **Mock + client**: `src/lib/mocks/analysis.json` (hand-written,
       matching Contract 3 exactly, ~48 series points, 4 inverters, 3
       models) and `src/lib/analysis.ts` (typed `runAnalysis(plant)`; uses
       the mock when `NEXT_PUBLIC_USE_MOCK_ANALYSIS=true`)
-- [ ] **Analysis panel** in `PlantDashboardView`: "Run 30-day analysis"
+      — **client done, mock skipped**: the real endpoint was already on
+      `main`, so `runAnalysis` calls it directly and the panel was built and
+      verified against real responses instead
+- [x] **Analysis panel** in `PlantDashboardView`: "Run 30-day analysis"
       button + loading state (up to ~15 s), expected-vs-actual chart
       (Recharts, flagged hours highlighted, true faults optional overlay),
       per-inverter table (status badge, kWh/revenue lost), model

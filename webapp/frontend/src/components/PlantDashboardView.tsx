@@ -15,6 +15,7 @@ import {
 import { KpiCard } from "@/components/KpiCard";
 import { WeatherHistoryChart } from "@/components/WeatherHistoryChart";
 import { GenerationHistoryChart, type AggregatedGenerationPoint } from "@/components/GenerationHistoryChart";
+import { AnalysisPanel } from "@/components/AnalysisPanel";
 
 function aggregateByTimestamp(points: GenerationPoint[]): AggregatedGenerationPoint[] {
   const totals = new Map<string, number>();
@@ -143,6 +144,8 @@ export function PlantDashboardView({ plant }: { plant: Plant }) {
           </tbody>
         </table>
       </div>
+
+      <AnalysisPanel plant={plant} />
     </div>
   );
 }
