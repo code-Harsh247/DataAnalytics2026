@@ -884,10 +884,10 @@ the backfill command (same seed → same data) once `backfill.py` is pushed.
       `http://localhost:3000`); set `NEXT_PUBLIC_API_URL` on Vercel; add the
       Vercel URL to Supabase Auth → URL Configuration.
       *Done when*: sign-up works on the live URL (analysis can still be mock)
-- [ ] **Demo flow script** (`DEMO.md`): sign up → configure plant → live
+- [x] **Demo flow script** (`DEMO.md`): sign up → configure plant → live
       dashboard → run analysis → compare models → point at a faulty
       inverter and its revenue loss. ~3 minutes
-- [ ] README: Linux/macOS run commands (`.venv/bin/...`)
+- [x] README: Linux/macOS run commands (`.venv/bin/...`)
 
 ### Together — integration (sync point 1)
 
@@ -900,7 +900,8 @@ the backfill command (same seed → same data) once `backfill.py` is pushed.
 ### Together — demo rehearsal (sync point 2)
 
 - [ ] Run `DEMO.md` end-to-end on the live URL on a fresh account
-- [ ] README "Hackathon MVP" summary with the model comparison table
+- [x] README "Hackathon MVP" summary with the model comparison table
+      (Harsh drafted it as "Model results"; Abhinav, edit freely)
 
 ### Optional — out of MVP scope (only if time remains)
 
@@ -910,7 +911,8 @@ the backfill command (same seed → same data) once `backfill.py` is pushed.
   `LATITUDE`/`LONGITUDE`/`TARIFF_PER_KWH`)
 - [x] Persisting backfilled history to Supabase so the live charts show 30
       days — `app/seed_supabase.py` (Abhinav)
-- Align live fault-injection constants with the backfill's (see FINDINGS.md §3)
+- [x] Align live fault-injection constants with the backfill's (see
+      FINDINGS.md §3) (Harsh)
 - Server-side aggregation for energy/revenue totals
 - Automated tests
 - Custom favicon/logo

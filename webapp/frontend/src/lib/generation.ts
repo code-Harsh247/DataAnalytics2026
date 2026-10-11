@@ -4,12 +4,16 @@ import type { Plant } from "./plants";
 const DEFAULT_INVERTER_COUNT = 4;
 const DEFAULT_CAPACITY_KW = 5.0;
 const TYPICAL_PANEL_DENSITY_W_PER_SQM = 150; // installed-area density, not bare panel density
-const FAULT_START_PROBABILITY = 0.04; // per 15-min tick, per currently-healthy inverter
+const REVENUE_INTERVAL_HOURS = 0.25; // 15-minute ticks
+// Same fault model as the backend backfill (app/backfill.py), so the live
+// dashboard and the 30-day analysis describe the same plant: ~8-10% of
+// hours faulted, not the ~50% the old 4%-per-tick rate produced.
+const FAULT_START_PROB_PER_HOUR = 0.02; // per currently-healthy inverter
+const FAULT_START_PROBABILITY = FAULT_START_PROB_PER_HOUR * REVENUE_INTERVAL_HOURS; // per tick
 const FAULT_MIN_HOURS = 2;
 const FAULT_MAX_HOURS = 8;
-const FAULT_MIN_SEVERITY = 0.15;
-const FAULT_MAX_SEVERITY = 0.5;
-const REVENUE_INTERVAL_HOURS = 0.25; // 15-minute ticks
+const FAULT_MIN_SEVERITY = 0.05;
+const FAULT_MAX_SEVERITY = 0.4;
 
 // Real per-module-type temperature coefficients (%/deg C above 25C STC).
 // Thin-film genuinely tolerates heat better than crystalline silicon in

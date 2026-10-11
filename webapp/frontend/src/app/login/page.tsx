@@ -15,21 +15,26 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (session) router.replace("/");
+    // The user's own plant is the main page; /setup-plant shows the onboarding
+    // form until a plant exists, then that plant's dashboard.
+    if (session) router.replace("/setup-plant");
   }, [session, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const result = mode === "signin" ? await signIn(email, password) : await signUp(email, password);
-    setLoading(false);
-    if (result.error) {
-      setError(result.error);
-    } else if (mode === "signup") {
-      // Supabase requires email confirmation by default -- no session yet.
-      setSignupSuccess(true);
+    if (mode === "signin") {
+      const result = await signIn(email, password);
+      setLoading(false);
+      if (result.error) setError(result.error);
+      return;
     }
+    const result = await signUp(email, password);
+    setLoading(false);
+    if (result.error) setError(result.error);
+    else if (result.needsConfirmation) setSignupSuccess(true);
+    // Otherwise Supabase signed them in and the effect above redirects.
   };
 
   return (
@@ -121,8 +126,8 @@ export default function LoginPage() {
         </div>
 
         <p className="text-xs text-gray-400 text-center">
-          Demo product — data shown is from a real historical dataset (two Indian solar plants),
-          not a live feed.
+          Demo product — weather is real, inverter output is simulated from it (there&apos;s no
+          real hardware attached).
         </p>
       </div>
     </div>

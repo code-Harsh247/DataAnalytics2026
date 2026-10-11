@@ -8,7 +8,7 @@ interface AuthContextValue {
   session: Session | null;
   user: User | null;
   loading: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string) => Promise<{ error: string | null; needsConfirmation: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
@@ -33,8 +33,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signUp = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password });
-    return { error: error?.message ?? null };
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    // With "Confirm email" off, Supabase signs the user straight in; with it
+    // on, there's no session until they click the emailed link.
+    return { error: error?.message ?? null, needsConfirmation: !error && !data.session };
   };
 
   const signIn = async (email: string, password: string) => {
