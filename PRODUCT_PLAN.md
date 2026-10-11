@@ -952,3 +952,12 @@ _(append: date — who — what landed on `main`)_
   gradient boosting row there) and `app/seed_supabase.py`: fills your own
   plant with 30 days of history. Run from `webapp/backend`:
   `SEED_EMAIL=<login email> .venv/bin/python -m app.seed_supabase`
+- 2026-10-12 — Abhinav — **FYI, no action needed**: `FINDINGS.md` §5
+  "Optional findings" — side experiments with extra models. Headline: a
+  no-ML peer comparison (each inverter vs. its neighbours) beats our Random
+  Forest (F1 0.781 vs 0.705) and nearly matches a model trained on the
+  labels; it's blind to plant-wide faults unless paired with a weather-only
+  check. **Nothing in the app or API contract changed.** Your gradient
+  boosting model and the comparison panel proceed exactly as planned. Worth
+  knowing for the demo Q&A
+

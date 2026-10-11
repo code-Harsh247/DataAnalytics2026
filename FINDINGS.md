@@ -154,3 +154,58 @@ single run moves by ±0.1 F1.)
 - Per-inverter thresholds instead of one global threshold?
 - Precision and recall broken down by fault severity, to show *where* the
   detection limit is (expected: about 10%).
+
+## 5. Optional findings — exploratory, not in the app (Abhinav, 2026-10-11)
+
+Extra models tested outside the shared pipeline. **Nothing here changes the
+app or the API**; the three shared models (plus Harsh's gradient boosting)
+remain the comparison the product shows. Recorded here as the strongest
+candidate for a post-MVP upgrade, and as talking points for the demo. The
+experiment code is in Abhinav's local sandbox; ask if you want it.
+
+Method: same canonical weather, split and metrics as section 1, averaged over
+8 seeded datasets. Models are compared **paired per seed**, not by their
+±std: the std mostly reflects how hard each dataset is (one seed is hard for
+every model).
+
+| Model | Mean F1 | vs RF (paired, seeds won) | Notes |
+|---|---|---|---|
+| Supervised ceiling (trained *on the labels*, not deployable) | 0.787 | +0.082 (7/8) | Upper bound for per-hour detection |
+| **Peer z-score** (no ML) | **0.781** | **+0.076 (7/8)** | Each inverter vs. the median of the others, in robust σ of its own usual ratio |
+| **Peer hybrid**: peer z-score OR weather-only Ridge | 0.765 | +0.06 | **0.781 when plant-wide faults occur**, where the peer model alone drops to 0.714 |
+| Ridge regression (expected power) | 0.758 | +0.053 (7/8) | Best power fit, R² 0.991 (RF 0.988) |
+| `random_forest` (shared) | 0.705 | — | |
+
+**What we learned**
+1. **A simple peer comparison beats the Random Forest and nearly matches a
+   model trained on the answers** (0.781 vs ceiling 0.787,
+   statistically indistinguishable). It works because the biggest noise
+   source, the gap between reported weather and the real sky, hits every
+   inverter equally, and dividing by the peers cancels it. It runs in about
+   0.04 s against RF's 0.8 s, and explains itself: "INV-3 made 2.8σ less
+   than its neighbours".
+2. **Per-hour detection is at the data's ceiling.** Fancier per-hour models
+   (k-NN, MLP, LOF, SVM) were skipped as a result: at best they could tie.
+3. **Blind spot: plant-wide faults.** When every inverter drops together
+   (outage, curtailment), peer comparison catches **3%** of them. RF and
+   Ridge catch about 60%, because they use the peer feature too. Adding a
+   weather-only check (the hybrid) brings this to **98%**, costing about
+   0.02 F1 when plant-wide faults never occur.
+4. **Mild faults (<10%) are the frontier.** Every per-hour method, including
+   the supervised one, catches at most 13%. Accumulating evidence over time
+   (a CUSUM variant) reached 33% at the same F1, at the cost of precision.
+5. **Live alerting is viable without smoothing.** A trailing (live-safe) 3h
+   median lags every fault by an hour and costs 0.15 F1; for the peer model,
+   no smoothing at all is as good as or better than the centered median.
+6. **Small plants are fine.** Peer comparison stays the best deployable model
+   with 3 inverters (−0.014) and 2 inverters (−0.09; every model drops there,
+   including the ceiling).
+
+**Caveat**: every simulated inverter shares one orientation and one sky,
+which is close to ideal for peer comparison. On a plant with mixed
+tilt/azimuth per inverter it would be weaker. This is untested.
+
+**If we upgrade post-MVP**: promote the peer hybrid as a 4th/5th model
+(`app/models/peer_hybrid.py`). It's additive to the API contract (one more
+row in `comparison`), and since the API picks the best F1 it would likely
+become the default.
