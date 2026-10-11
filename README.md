@@ -52,6 +52,9 @@ Two things run side by side in this repo:
 
 ## Current state
 
+ML results and the reasoning behind every modelling decision are in
+`FINDINGS.md`.
+
 Phases 0–15 are built and verified end-to-end (see `PRODUCT_PLAN.md` for the
 full phase-by-phase log, including every bug found and how it was verified —
 this README is the summary, that file is the detailed record).

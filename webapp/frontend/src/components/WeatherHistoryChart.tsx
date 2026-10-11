@@ -12,8 +12,7 @@ import {
 import type { WeatherPoint } from "@/lib/plantDashboard";
 
 function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toISOString().slice(11, 16); // HH:MM UTC
+  return new Date(iso).toISOString().slice(5, 16).replace("T", " "); // MM-DD HH:MM UTC
 }
 
 export function WeatherHistoryChart({ data }: { data: WeatherPoint[] }) {
@@ -39,7 +38,7 @@ export function WeatherHistoryChart({ data }: { data: WeatherPoint[] }) {
             name="GHI"
             stroke="#f59e0b"
             strokeWidth={2}
-            dot={{ r: 2 }}
+            dot={chartData.length <= 100 ? { r: 2 } : false}
             isAnimationActive={false}
           />
         </LineChart>

@@ -1,5 +1,26 @@
 import { supabase } from "./supabase";
 
+// Supabase caps every response at 1000 rows, so anything that can grow past
+// that (a seeded month is ~12k generation rows) has to be read in pages.
+const PAGE_SIZE = 1000;
+const HISTORY_DAYS = 7; // chart window; totals still cover all readings
+
+type PageQuery<T> = (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>;
+
+async function fetchAllPages<T>(query: PageQuery<T>): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await query(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) return rows;
+  }
+}
+
+function historyStartIso(): string {
+  return new Date(Date.now() - HISTORY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
 export interface WeatherPoint {
   recorded_at: string;
   temperature_c: number | null;
@@ -8,15 +29,17 @@ export interface WeatherPoint {
   clearsky_index: number | null;
 }
 
-export async function getWeatherHistory(plantId: string, limit = 200): Promise<WeatherPoint[]> {
-  const { data, error } = await supabase
-    .from("weather_readings")
-    .select("recorded_at, temperature_c, cloud_cover_pct, ghi_wm2, clearsky_index")
-    .eq("plant_id", plantId)
-    .order("recorded_at", { ascending: true })
-    .limit(limit);
-  if (error) throw error;
-  return data ?? [];
+export async function getWeatherHistory(plantId: string): Promise<WeatherPoint[]> {
+  const since = historyStartIso();
+  return fetchAllPages<WeatherPoint>((from, to) =>
+    supabase
+      .from("weather_readings")
+      .select("recorded_at, temperature_c, cloud_cover_pct, ghi_wm2, clearsky_index")
+      .eq("plant_id", plantId)
+      .gte("recorded_at", since)
+      .order("recorded_at", { ascending: true })
+      .range(from, to),
+  );
 }
 
 export interface GenerationPoint {
@@ -34,19 +57,22 @@ async function getPlantInverterIds(plantId: string): Promise<string[]> {
   return (data ?? []).map((i) => i.id as string);
 }
 
-export async function getGenerationHistory(plantId: string, limit = 800): Promise<GenerationPoint[]> {
+export async function getGenerationHistory(plantId: string): Promise<GenerationPoint[]> {
   // generation_readings has no plant_id directly -- go via inverters.
   const inverterIds = await getPlantInverterIds(plantId);
   if (inverterIds.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from("generation_readings")
-    .select("recorded_at, inverter_id, ac_power_kw, dc_power_kw, fault_active, revenue_per_interval")
-    .in("inverter_id", inverterIds)
-    .order("recorded_at", { ascending: true })
-    .limit(limit);
-  if (error) throw error;
-  return data ?? [];
+  const since = historyStartIso();
+  return fetchAllPages<GenerationPoint>((from, to) =>
+    supabase
+      .from("generation_readings")
+      .select("recorded_at, inverter_id, ac_power_kw, dc_power_kw, fault_active, revenue_per_interval")
+      .in("inverter_id", inverterIds)
+      .gte("recorded_at", since)
+      .order("recorded_at", { ascending: true })
+      .order("inverter_id", { ascending: true })
+      .range(from, to),
+  );
 }
 
 export interface InverterStatus {
@@ -109,13 +135,15 @@ export async function getPlantTotals(plantId: string): Promise<PlantTotals> {
   const inverterIds = await getPlantInverterIds(plantId);
   if (inverterIds.length === 0) return { total_energy_kwh: 0, total_revenue: 0, reading_count: 0 };
 
-  const { data, error } = await supabase
-    .from("generation_readings")
-    .select("ac_power_kw, revenue_per_interval")
-    .in("inverter_id", inverterIds);
-  if (error) throw error;
-
-  const rows = data ?? [];
+  const rows = await fetchAllPages<{ ac_power_kw: number | null; revenue_per_interval: number | null }>(
+    (from, to) =>
+      supabase
+        .from("generation_readings")
+        .select("ac_power_kw, revenue_per_interval")
+        .in("inverter_id", inverterIds)
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
   const total_energy_kwh = rows.reduce((sum, r) => sum + (r.ac_power_kw ?? 0) * INTERVAL_HOURS, 0);
   const total_revenue = rows.reduce((sum, r) => sum + (r.revenue_per_interval ?? 0), 0);
   return { total_energy_kwh, total_revenue, reading_count: rows.length };

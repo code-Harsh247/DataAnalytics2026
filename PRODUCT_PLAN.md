@@ -651,7 +651,7 @@ follow the rules in "Working agreement" rather than waiting on a reply.
    |---|---|
    | Abhinav | `webapp/backend/app/backfill.py`, `app/models/base.py`, `app/models/__init__.py`, `app/models/evaluate.py`, `app/models/random_forest.py`, `app/models/isolation_forest.py`, `app/analysis.py` (new), the `/api/plants/analyze` route in `main.py`, `requirements.txt`, `data/backfill/` |
    | Harsh | `app/models/gradient_boosting.py`, everything under `webapp/frontend/`, deployment config files, the CORS block in `main.py`, `README.md` |
-   | Shared (append-only) | `PRODUCT_PLAN.md` — tick your own checkboxes, append to the change log / status log |
+   | Shared (append-only) | `PRODUCT_PLAN.md` — tick your own checkboxes, append to the change log / status log; `FINDINGS.md` — model results, decisions and why, bugs found |
 
    Models are auto-discovered from `app/models/`, so adding a model never
    requires editing anyone else's file.
@@ -743,11 +743,35 @@ are passed in but only daylight rows are scored.
 - Split: first 70% of timestamps train, last 30% test (time order, no shuffle)
 - Detection: precision / recall / F1 of `flagged` vs `is_fault`, daylight rows only
 - Power fit: R² / MAE of `expected_kw` vs `ac_power_kw` on healthy daylight rows
-- **Baseline to beat**: a one-line power/irradiance ratio threshold. On the
-  first draft of the dataset this scored F1 ≈ 0.99 → the dataset was too
-  easy; Abhinav is making it harder (smaller fault severities, more noise,
-  unlabeled shading dips) before models are compared. Re-run evaluation
-  after pulling a new `sample_plant.csv`.
+- **Baseline to beat**: `baseline_ratio` (one plant-wide power/irradiance
+  ratio, flag at >12% below). On the first draft of the dataset it scored
+  F1 ≈ 0.99, so the dataset was made harder: fault severity 5–40%, 3%
+  measurement noise, a shared ±6% site-irradiance error (reanalysis weather ≠
+  on-site sun), and unlabeled 1–2h partial-shading dips as false-alarm bait.
+- **Shared helpers in `base.py`** (use them, don't copy them):
+  `add_peer_features(df)` → `peer_median_kw` (median output of the *other*
+  inverters at the same hour — the strongest single feature, because it
+  absorbs the site-irradiance error) and `smooth_daylight_scores(df)`
+  (centered 3-hour rolling median of `anomaly_score` per inverter).
+- **Undefined metrics are `None`**, not 0 (no faults in the test window →
+  no recall/F1; a model that flags nothing → no precision).
+- **Checking across seeds**: one test window has only ~35 faulted hours, so
+  a single run is noisy. Before claiming one model beats another, compare
+  mean F1 over seeds 1–8 (see "Current results").
+
+**Current results** (canonical dataset, seed 42 / mean over seeds 1–8):
+
+| model | owner | F1 (seed 42) | mean F1 (8 seeds) | precision | recall | R² |
+|---|---|---|---|---|---|---|
+| `baseline_ratio` | shared | 0.610 | 0.638 | 0.58 | 0.73 | 0.974 |
+| `random_forest` | Abhinav | 0.675 | **0.705** | 0.70 | 0.72 | 0.988 |
+| `isolation_forest` | Abhinav | 0.667 | 0.628 | 0.73 | 0.57 | — |
+| `gradient_boosting` | Harsh | | | | | |
+
+Takeaways so far: the expected-power model (RF) clearly beats physics-only
+and label-free detection; Isolation Forest is the most precise but misses
+the milder faults. Faults below ~10% severity sit inside the noise floor and
+are effectively undetectable by any model — expected, not a bug.
 
 ### Contract 3 — API
 
@@ -761,14 +785,15 @@ Supabase writes from the backend.
   "tilt_degrees": 18, "azimuth_degrees": 180,
   "temp_coefficient": -0.0035, "degradation_factor": 0.985,
   "inverter_count": 4, "tariff_per_kwh": 4.0,
-  "days": 30,                     // optional, default 30, max 90
+  "days": 30,                     // optional, default 30, min 21, max 90
   "model": "random_forest" }      // optional, default = best F1
 
 // response 200
 {
   "model": "random_forest",
   "period": { "start": "2026-09-01T00:00:00Z", "end": "2026-09-30T23:00:00Z",
-              "test_start": "2026-09-21T23:00:00Z" },
+              "test_start": "2026-09-21T23:00:00Z",
+              "test_fault_hours": 35 },  // 0 → metrics are null, say so in the UI
   "series": [   // plant total per hour (summed over inverters), test window only
     { "timestamp": "2026-09-25T06:00:00Z", "actual_kw": 3.1,
       "expected_kw": 3.4, "flagged": false, "true_fault": false } ],
@@ -777,16 +802,24 @@ Supabase writes from the backend.
       "est_kwh_lost": 4.2, "est_revenue_lost": 16.8,
       "status": "healthy" | "warning" | "critical" } ],
   "comparison": [   // every registered model, same test window
+    // sorted by f1 desc; precision/recall/f1 may be null (see test_fault_hours)
     { "model": "random_forest",    "precision": 0.88, "recall": 0.81, "f1": 0.84, "r2": 0.97, "mae_kw": 0.05 },
     { "model": "isolation_forest", "precision": 0.70, "recall": 0.75, "f1": 0.72, "r2": null, "mae_kw": null } ],
   "totals": { "energy_kwh": 812.0, "revenue": 3248.0 }
 }
-// errors: 400 bad input, 502 weather provider failure — body { "detail": "..." }
+// series: `expected_kw` is null for models without a power model (isolation_forest)
+// errors: 400 unknown model, 422 invalid/missing fields (FastAPI validation,
+//         `detail` is a list), 502 weather provider failure — body { "detail": ... }
 ```
 
 Status rule: `critical` if flagged_hours ≥ 10% of daylight test hours,
 `warning` if ≥ 3%, else `healthy`. `est_kwh_lost` = Σ max(expected − actual, 0)
-over flagged hours; revenue = kWh × tariff. Expected runtime: < 15 s.
+over flagged hours (peer median stands in for expected when a model has no
+power model); revenue = kWh × tariff. Measured runtime: ~2 s. Default
+model = best F1, or `random_forest` when F1 is unavailable. Results are
+deterministic per plant (fixed seed), so re-running gives the same answer.
+
+**Run it locally**: `cd webapp/backend && .venv/bin/uvicorn app.main:app --reload --port 8000`
 
 ---
 
@@ -795,27 +828,23 @@ over flagged hours; revenue = kWh × tariff. Expected runtime: < 15 s.
 Order matters: items 1–2 unblock Harsh's model work, so they ship first.
 
 - [x] Local backend setup (venv on Linux, `requirements.txt` installs clean)
-- [ ] **1. Backfill script + canonical dataset** — built locally
-      (`app/backfill.py`, `data/backfill/sample_plant.csv`), needs the
-      difficulty fix above, then push.
-      *Done when*: on `main`, ratio baseline F1 clearly < 0.9
-- [ ] **2. Model interface + evaluation harness** — built locally
-      (`app/models/base.py`, `__init__.py`, `evaluate.py`), push with 1,
-      plus `app/models/baseline_ratio.py` as the reference baseline.
-      *Done when*: `evaluate` runs on `main` and prints the baseline row
-- [ ] **3. Model 1 — Random Forest** (`random_forest.py`): predict healthy
+- [x] **1. Backfill script + canonical dataset** (`app/backfill.py`,
+      `data/backfill/sample_plant.csv`) — baseline F1 0.61
+- [x] **2. Model interface + evaluation harness** (`app/models/base.py`,
+      `__init__.py`, `evaluate.py`, `baseline_ratio.py`)
+- [x] **3. Model 1 — Random Forest** (`random_forest.py`): predict healthy
       `ac_power_kw` from weather features + inverter, flag when residual
       ratio exceeds a threshold tuned on the train window.
       *Done when*: beats baseline F1 in `evaluate`
-- [ ] **4. Model 2 — Isolation Forest** (`isolation_forest.py`):
+- [x] **4. Model 2 — Isolation Forest** (`isolation_forest.py`):
       unsupervised on weather + power + power/poa ratio, daylight rows;
       `expected_kw` = NaN. *Done when*: appears in `evaluate` output
-- [ ] **5. `/api/plants/analyze`** (`app/analysis.py` + route) matching
+- [x] **5. `/api/plants/analyze`** (`app/analysis.py` + route) matching
       Contract 3, wired to every registered model.
       *Done when*: `curl -X POST localhost:8000/api/plants/analyze -H 'Content-Type: application/json' -d '{"lat":18,"lon":80,"capacity_kw":7.5,"tilt_degrees":18,"azimuth_degrees":180,"temp_coefficient":-0.0035,"degradation_factor":1,"inverter_count":4,"tariff_per_kwh":4}'`
       returns valid JSON in < 15 s
-- [ ] Pin versions in `requirements.txt`
-- [ ] Fix `weather.py` live pipeline: request `direct_normal_irradiance`
+- [x] Pin versions in `requirements.txt` (built on Python 3.14; needs ≥ 3.11)
+- [x] Fix `weather.py` live pipeline: request `direct_normal_irradiance`
       instead of `direct_radiation` (currently passes horizontal direct
       irradiance where pvlib expects DNI)
 
@@ -876,7 +905,9 @@ the backfill command (same seed → same data) once `backfill.py` is pushed.
 - Scheduled background ingestion (browser polling is fine for a demo)
 - Backend JWT auth / per-user data in FastAPI (replace hardcoded
   `LATITUDE`/`LONGITUDE`/`TARIFF_PER_KWH`)
-- Persisting backfilled history to Supabase so the live charts show 30 days
+- [x] Persisting backfilled history to Supabase so the live charts show 30
+      days — `app/seed_supabase.py` (Abhinav)
+- Align live fault-injection constants with the backfill's (see FINDINGS.md §3)
 - Server-side aggregation for energy/revenue totals
 - Automated tests
 - Custom favicon/logo
@@ -890,8 +921,43 @@ _(append: date — who — what changed — why)_
   to `tilt_degrees`/`azimuth_degrees` to match the existing
   `/api/synthetic/generate` request
 
+- 2026-10-11 — Abhinav — `base.py` gains `add_peer_features()` and
+  `smooth_daylight_scores()`; peer inverters' output is an allowed feature
+  (own output still isn't)
+- 2026-10-11 — Abhinav — API: `days` min 21 (shorter windows often hold no
+  test faults); `period.test_fault_hours` added; precision/recall/f1 can be
+  `null`; validation errors are 422 (FastAPI default), unknown model is 400
+
+- 2026-10-11 — Abhinav — **edited Harsh-owned frontend files** (needed to
+  display a seeded month): `lib/plantDashboard.ts` now reads in pages
+  (Supabase caps responses at 1000 rows), charts show the newest 7 days
+  (previously the *oldest* rows, so "latest conditions" was wrong), totals
+  cover all rows; `WeatherHistoryChart`/`GenerationHistoryChart` show
+  `MM-DD HH:MM` labels and drop dots above 100 points. Function signatures
+  unchanged apart from the removed optional `limit` params
+- 2026-10-11 — Abhinav — `backfill.build_dataset()` gains optional
+  `weather`, `step_minutes`, `efficiencies` (hourly default unchanged —
+  canonical dataset byte-identical)
+
 ### Status log
 
 _(append: date — who — what landed on `main`)_
 
 - 2026-10-11 — Abhinav — plan + contracts pushed
+- 2026-10-11 — Abhinav — backfill, canonical dataset, harness, baseline,
+  Random Forest, Isolation Forest, and `/api/plants/analyze` on `main`.
+  Harsh: dataset + harness are ready for the gradient boosting model, and
+  the real endpoint is ready, so the mock is optional
+- 2026-10-11 — Abhinav — `FINDINGS.md` (results + decision log — add your
+  gradient boosting row there) and `app/seed_supabase.py`: fills your own
+  plant with 30 days of history. Run from `webapp/backend`:
+  `SEED_EMAIL=<login email> .venv/bin/python -m app.seed_supabase`
+- 2026-10-12 — Abhinav — **FYI, no action needed**: `FINDINGS.md` §5
+  "Optional findings" — side experiments with extra models. Headline: a
+  no-ML peer comparison (each inverter vs. its neighbours) beats our Random
+  Forest (F1 0.781 vs 0.705) and nearly matches a model trained on the
+  labels; it's blind to plant-wide faults unless paired with a weather-only
+  check. **Nothing in the app or API contract changed.** Your gradient
+  boosting model and the comparison panel proceed exactly as planned. Worth
+  knowing for the demo Q&A
+

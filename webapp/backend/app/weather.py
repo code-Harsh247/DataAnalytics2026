@@ -15,7 +15,7 @@ import pvlib
 import requests
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-CURRENT_VARS = "temperature_2m,cloud_cover,shortwave_radiation,direct_radiation,diffuse_radiation"
+CURRENT_VARS = "temperature_2m,cloud_cover,shortwave_radiation,direct_normal_irradiance,diffuse_radiation"
 
 
 def fetch_current_weather(lat: float, lon: float) -> dict:
@@ -34,7 +34,7 @@ def fetch_current_weather(lat: float, lon: float) -> dict:
         "temperature_c": current["temperature_2m"],
         "cloud_cover_pct": current["cloud_cover"],
         "ghi_wm2": current["shortwave_radiation"],
-        "dni_wm2": current["direct_radiation"],
+        "dni_wm2": current["direct_normal_irradiance"],
         "dhi_wm2": current["diffuse_radiation"],
     }
 
