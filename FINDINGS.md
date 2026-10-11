@@ -174,6 +174,9 @@ single run moves by ±0.1 F1.)
   the live tick, not the seeded history. *Not fixed yet*: align the live
   constants with the backfill's (frontend, Harsh's area) so the live
   dashboard and the ML analysis describe the same plant.
+  - **Fixed** (Harsh, 2026-10-12). `generation.ts` now uses the backfill's
+    2%/hour start rate, converted per tick (0.5% per 15-min tick), and its
+    5–40% severity range. Fault durations (2–8 h) were already the same.
 
 ## 4. Open questions / next experiments
 

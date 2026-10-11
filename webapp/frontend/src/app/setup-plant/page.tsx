@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { usePlant } from "@/context/PlantContext";
 import { createPlant, type NewPlant } from "@/lib/plants";
 import { PlantDashboardView } from "@/components/PlantDashboardView";
+import { NavBar } from "@/components/NavBar";
 
 const MODULE_TYPES = ["Monocrystalline", "Polycrystalline", "Thin-film", "Other"];
 
@@ -95,6 +96,7 @@ export default function SetupPlantPage() {
   if (plant) {
     return (
       <div className="min-h-screen bg-gray-50">
+        <NavBar />
         <PlantDashboardView plant={plant} />
       </div>
     );
