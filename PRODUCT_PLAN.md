@@ -620,3 +620,278 @@ faults — the manually-inserted test fault from Phase 13, still correctly
 showing as active; 0 kWh/revenue — correct for all-nighttime data so far).
 Reloaded and confirmed a **genuinely new tick** (22:00 UTC) appeared
 automatically, proving this reads live data, not a cached snapshot.
+
+---
+
+## Hackathon MVP — Remaining Work (Abhinav + Harsh)
+
+Scope cut to what a hackathon MVP needs. The ML pipeline is the most
+important and most time-heavy part, so it is split across **both**
+teammates as a multi-model comparison. Abhinav owns the data foundation,
+evaluation harness, API, and two models; Harsh owns one model plus the
+frontend, demo flow, and deployment.
+
+**This section is written so the two of us can work with as little contact
+as possible.** Everything needed to start — contracts, file ownership,
+commands, and what "done" means — is here. If something isn't covered,
+follow the rules in "Working agreement" rather than waiting on a reply.
+
+---
+
+### Working agreement (read first)
+
+1. **The contracts below are frozen.** Build against them exactly. If a
+   change is truly needed, make it **additive only** (new optional field /
+   new column — never rename or remove), and log it in the
+   "Contract change log" at the bottom of this section in the same commit.
+2. **File ownership — only edit files you own.** Shared files are listed
+   explicitly; touch them only as described.
+
+   | Owner | Files |
+   |---|---|
+   | Abhinav | `webapp/backend/app/backfill.py`, `app/models/base.py`, `app/models/__init__.py`, `app/models/evaluate.py`, `app/models/random_forest.py`, `app/models/isolation_forest.py`, `app/analysis.py` (new), the `/api/plants/analyze` route in `main.py`, `requirements.txt`, `data/backfill/` |
+   | Harsh | `app/models/gradient_boosting.py`, everything under `webapp/frontend/`, deployment config files, the CORS block in `main.py`, `README.md` |
+   | Shared (append-only) | `PRODUCT_PLAN.md` — tick your own checkboxes, append to the change log / status log |
+
+   Models are auto-discovered from `app/models/`, so adding a model never
+   requires editing anyone else's file.
+3. **Git**: work on your own branch (`abhinav/ml`, `harsh/frontend` —
+   `harsh/gb-model` optional), rebase on `main` often, merge to `main` when
+   a checkbox's "done when" is met. Push at least once a day even if
+   unfinished, so the other person can see progress.
+4. **Status without messaging**: tick checkboxes here and add a one-line
+   dated entry to the "Status log" when you merge something the other person
+   depends on.
+5. **Blocked?** Never wait. Every dependency below has a fallback (mock
+   data, sample dataset, or regenerate it yourself with the script).
+6. **Sync points** (the only times a real conversation is needed): the
+   integration step and the final demo rehearsal. Everything else is async.
+
+---
+
+### Contract 1 — Dataset (backfill output)
+
+**How the data is obtained** — no one needs to send data to anyone; anyone
+can regenerate it:
+
+1. Real **historical weather** for the plant's lat/lon from Open-Meteo's
+   archive API (free, no key, fixed start/end dates → reproducible;
+   ERA5 data trails real time by ~5 days, so the end date must be ≥6 days ago)
+2. **Physics** (same as `synthetic_generation.py`, vectorized): pvlib
+   plane-of-array irradiance → NOCT cell temperature → temperature derating
+   → degradation → inverter efficiency
+3. **Per-inverter realism**: persistent efficiency spread, slow soiling
+   drift, measurement noise (so models can't just rediscover the formula)
+4. **Fault injection with labels**: random multi-hour derate episodes;
+   every row carries `is_fault` / `fault_severity` as ground truth
+5. Saved as CSV + a `.meta.json` with the exact arguments used
+
+```bash
+cd webapp/backend
+.venv/bin/python -m app.backfill --lat 18.0 --lon 80.0 \
+    --start 2026-09-01 --end 2026-09-30 --seed 42 \
+    --out data/backfill/sample_plant.csv
+```
+
+Same arguments + same seed → identical file on both machines.
+**Canonical dataset** for all model comparison: `data/backfill/sample_plant.csv`
+(committed). Use it for every reported number so results are comparable.
+
+**Schema** — one row per inverter per **hour** (UTC), 4 inverters × 720
+hours = 2,880 rows:
+
+| column | type | meaning |
+|---|---|---|
+| `timestamp` | datetime UTC | end of the hourly interval |
+| `inverter` | str | `INV-1` … `INV-4` |
+| `ghi`, `dni`, `dhi` | float W/m² | real irradiance (Open-Meteo) |
+| `poa_irradiance` | float W/m² | irradiance on the tilted panels (pvlib) |
+| `air_temp`, `cell_temp` | float °C | ambient, estimated panel temperature |
+| `wind_speed` | float km/h | real |
+| `cloud_cover` | int % | real |
+| `solar_elevation` | float ° | sun height, mid-interval |
+| `is_daylight` | bool | `solar_elevation > 5°` |
+| `dc_power_kw`, `ac_power_kw` | float | synthetic **observed** output (faults + noise applied) |
+| `is_fault` | bool | **label** — never a model input |
+| `fault_severity` | float | **label** — fraction of output lost, 0 when healthy |
+
+### Contract 2 — Model interface
+
+Defined in `webapp/backend/app/models/base.py` (full docstring + a worked
+example there). One file per model, one `AnomalyModel` subclass each:
+
+```python
+class MyModel(AnomalyModel):
+    name = "gradient_boosting"            # unique, snake_case
+    def fit(self, train: pd.DataFrame) -> None: ...
+    def predict(self, df: pd.DataFrame) -> pd.DataFrame:
+        # return df + expected_kw (NaN if N/A), anomaly_score (higher = worse), flagged (bool)
+```
+
+Rules: label columns are stripped by the harness before `fit`/`predict`;
+power-predicting models must not use `ac_power_kw`/`dc_power_kw` as
+features (use `WEATHER_FEATURES` from `base.py` + `inverter`); night rows
+are passed in but only daylight rows are scored.
+
+**Evaluation** — same split and metrics for everyone:
+
+```bash
+.venv/bin/python -m app.models.evaluate --data data/backfill/sample_plant.csv
+.venv/bin/python -m app.models.evaluate --data data/backfill/sample_plant.csv --model gradient_boosting
+```
+
+- Split: first 70% of timestamps train, last 30% test (time order, no shuffle)
+- Detection: precision / recall / F1 of `flagged` vs `is_fault`, daylight rows only
+- Power fit: R² / MAE of `expected_kw` vs `ac_power_kw` on healthy daylight rows
+- **Baseline to beat**: a one-line power/irradiance ratio threshold. On the
+  first draft of the dataset this scored F1 ≈ 0.99 → the dataset was too
+  easy; Abhinav is making it harder (smaller fault severities, more noise,
+  unlabeled shading dips) before models are compared. Re-run evaluation
+  after pulling a new `sample_plant.csv`.
+
+### Contract 3 — API
+
+`POST /api/plants/analyze` — stateless; the backend fetches weather,
+generates the dataset in memory, trains every model, returns results. No
+Supabase writes from the backend.
+
+```jsonc
+// request — fields map 1:1 from resolvePlantDefaults() in lib/generation.ts
+{ "lat": 18.0, "lon": 80.0, "capacity_kw": 7.5,
+  "tilt_degrees": 18, "azimuth_degrees": 180,
+  "temp_coefficient": -0.0035, "degradation_factor": 0.985,
+  "inverter_count": 4, "tariff_per_kwh": 4.0,
+  "days": 30,                     // optional, default 30, max 90
+  "model": "random_forest" }      // optional, default = best F1
+
+// response 200
+{
+  "model": "random_forest",
+  "period": { "start": "2026-09-01T00:00:00Z", "end": "2026-09-30T23:00:00Z",
+              "test_start": "2026-09-21T23:00:00Z" },
+  "series": [   // plant total per hour (summed over inverters), test window only
+    { "timestamp": "2026-09-25T06:00:00Z", "actual_kw": 3.1,
+      "expected_kw": 3.4, "flagged": false, "true_fault": false } ],
+  "inverters": [
+    { "label": "INV-1", "flagged_hours": 12, "true_fault_hours": 10,
+      "est_kwh_lost": 4.2, "est_revenue_lost": 16.8,
+      "status": "healthy" | "warning" | "critical" } ],
+  "comparison": [   // every registered model, same test window
+    { "model": "random_forest",    "precision": 0.88, "recall": 0.81, "f1": 0.84, "r2": 0.97, "mae_kw": 0.05 },
+    { "model": "isolation_forest", "precision": 0.70, "recall": 0.75, "f1": 0.72, "r2": null, "mae_kw": null } ],
+  "totals": { "energy_kwh": 812.0, "revenue": 3248.0 }
+}
+// errors: 400 bad input, 502 weather provider failure — body { "detail": "..." }
+```
+
+Status rule: `critical` if flagged_hours ≥ 10% of daylight test hours,
+`warning` if ≥ 3%, else `healthy`. `est_kwh_lost` = Σ max(expected − actual, 0)
+over flagged hours; revenue = kWh × tariff. Expected runtime: < 15 s.
+
+---
+
+### Abhinav — data foundation + 2 models + API
+
+Order matters: items 1–2 unblock Harsh's model work, so they ship first.
+
+- [x] Local backend setup (venv on Linux, `requirements.txt` installs clean)
+- [ ] **1. Backfill script + canonical dataset** — built locally
+      (`app/backfill.py`, `data/backfill/sample_plant.csv`), needs the
+      difficulty fix above, then push.
+      *Done when*: on `main`, ratio baseline F1 clearly < 0.9
+- [ ] **2. Model interface + evaluation harness** — built locally
+      (`app/models/base.py`, `__init__.py`, `evaluate.py`), push with 1,
+      plus `app/models/baseline_ratio.py` as the reference baseline.
+      *Done when*: `evaluate` runs on `main` and prints the baseline row
+- [ ] **3. Model 1 — Random Forest** (`random_forest.py`): predict healthy
+      `ac_power_kw` from weather features + inverter, flag when residual
+      ratio exceeds a threshold tuned on the train window.
+      *Done when*: beats baseline F1 in `evaluate`
+- [ ] **4. Model 2 — Isolation Forest** (`isolation_forest.py`):
+      unsupervised on weather + power + power/poa ratio, daylight rows;
+      `expected_kw` = NaN. *Done when*: appears in `evaluate` output
+- [ ] **5. `/api/plants/analyze`** (`app/analysis.py` + route) matching
+      Contract 3, wired to every registered model.
+      *Done when*: `curl -X POST localhost:8000/api/plants/analyze -H 'Content-Type: application/json' -d '{"lat":18,"lon":80,"capacity_kw":7.5,"tilt_degrees":18,"azimuth_degrees":180,"temp_coefficient":-0.0035,"degradation_factor":1,"inverter_count":4,"tariff_per_kwh":4}'`
+      returns valid JSON in < 15 s
+- [ ] Pin versions in `requirements.txt`
+- [ ] Fix `weather.py` live pipeline: request `direct_normal_irradiance`
+      instead of `direct_radiation` (currently passes horizontal direct
+      irradiance where pvlib expects DNI)
+
+### Harsh — 1 model + frontend + demo flow + deployment
+
+Start with frontend/infra (no dependencies); switch to the model once item
+1 above is on `main`. If it isn't yet, generate the dataset yourself with
+the backfill command (same seed → same data) once `backfill.py` is pushed.
+
+- [ ] **Local setup**: backend venv (`python3 -m venv .venv &&
+      .venv/bin/pip install -r requirements.txt`), `npm install` in
+      `webapp/frontend`, `.env.local` with `NEXT_PUBLIC_SUPABASE_URL` /
+      `NEXT_PUBLIC_SUPABASE_ANON_KEY` (get from the Supabase dashboard →
+      Project Settings → API) and `NEXT_PUBLIC_API_URL=http://localhost:8000`
+- [ ] **Supabase**: disable "Confirm email" (Authentication → Providers →
+      Email). *Done when*: fresh sign-up → setup plant → dashboard works
+      with no email step
+- [ ] **Model 3 — Gradient Boosting** (`app/models/gradient_boosting.py`,
+      `HistGradientBoostingRegressor`): predict healthy `ac_power_kw` from
+      weather features + inverter, flag on residual threshold.
+      *Done when*: appears in `evaluate` output on the canonical dataset
+- [ ] **Mock + client**: `src/lib/mocks/analysis.json` (hand-written,
+      matching Contract 3 exactly, ~48 series points, 4 inverters, 3
+      models) and `src/lib/analysis.ts` (typed `runAnalysis(plant)`; uses
+      the mock when `NEXT_PUBLIC_USE_MOCK_ANALYSIS=true`)
+- [ ] **Analysis panel** in `PlantDashboardView`: "Run 30-day analysis"
+      button + loading state (up to ~15 s), expected-vs-actual chart
+      (Recharts, flagged hours highlighted, true faults optional overlay),
+      per-inverter table (status badge, kWh/revenue lost), model
+      comparison table (precision/recall/F1/R²) with a model selector that
+      re-requests with `model`. *Done when*: works fully on the mock
+- [ ] **Deploy**: backend on Render (or Railway), frontend on Vercel; CORS
+      origins from an env var (`CORS_ORIGINS`, comma-separated, default
+      `http://localhost:3000`); set `NEXT_PUBLIC_API_URL` on Vercel; add the
+      Vercel URL to Supabase Auth → URL Configuration.
+      *Done when*: sign-up works on the live URL (analysis can still be mock)
+- [ ] **Demo flow script** (`DEMO.md`): sign up → configure plant → live
+      dashboard → run analysis → compare models → point at a faulty
+      inverter and its revenue loss. ~3 minutes
+- [ ] README: Linux/macOS run commands (`.venv/bin/...`)
+
+### Together — integration (sync point 1)
+
+- [ ] Harsh sets `NEXT_PUBLIC_USE_MOCK_ANALYSIS=false`, points at the real
+      endpoint (local, then deployed); fix any contract mismatch
+      (log it in the change log)
+- [ ] Pick the default model (best F1 on the canonical dataset)
+- [ ] Redeploy backend + frontend; verify end-to-end on the live URL
+
+### Together — demo rehearsal (sync point 2)
+
+- [ ] Run `DEMO.md` end-to-end on the live URL on a fresh account
+- [ ] README "Hackathon MVP" summary with the model comparison table
+
+### Optional — out of MVP scope (only if time remains)
+
+- More models (e.g. LSTM autoencoder)
+- Scheduled background ingestion (browser polling is fine for a demo)
+- Backend JWT auth / per-user data in FastAPI (replace hardcoded
+  `LATITUDE`/`LONGITUDE`/`TARIFF_PER_KWH`)
+- Persisting backfilled history to Supabase so the live charts show 30 days
+- Server-side aggregation for energy/revenue totals
+- Automated tests
+- Custom favicon/logo
+
+### Contract change log
+
+_(append: date — who — what changed — why)_
+
+- 2026-10-11 — Abhinav — dataset is **hourly CSV**, not 15-min parquet
+  (Open-Meteo archive is hourly; no extra dependency); request fields renamed
+  to `tilt_degrees`/`azimuth_degrees` to match the existing
+  `/api/synthetic/generate` request
+
+### Status log
+
+_(append: date — who — what landed on `main`)_
+
+- 2026-10-11 — Abhinav — plan + contracts pushed
