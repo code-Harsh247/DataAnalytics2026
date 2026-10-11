@@ -766,7 +766,7 @@ are passed in but only daylight rows are scored.
 | `baseline_ratio` | shared | 0.610 | 0.638 | 0.58 | 0.73 | 0.974 |
 | `random_forest` | Abhinav | 0.675 | **0.705** | 0.70 | 0.72 | 0.988 |
 | `isolation_forest` | Abhinav | 0.667 | 0.628 | 0.73 | 0.57 | — |
-| `gradient_boosting` | Harsh | | | | | |
+| `gradient_boosting` | Harsh | 0.675 | 0.677 | 0.73 | 0.64 | 0.987 |
 
 Takeaways so far: the expected-power model (RF) clearly beats physics-only
 and label-free detection; Isolation Forest is the most precise but misses
@@ -862,7 +862,7 @@ the backfill command (same seed → same data) once `backfill.py` is pushed.
 - [x] **Supabase**: disable "Confirm email" (Authentication → Providers →
       Email). *Done when*: fresh sign-up → setup plant → dashboard works
       with no email step
-- [ ] **Model 3 — Gradient Boosting** (`app/models/gradient_boosting.py`,
+- [x] **Model 3 — Gradient Boosting** (`app/models/gradient_boosting.py`,
       `HistGradientBoostingRegressor`): predict healthy `ac_power_kw` from
       weather features + inverter, flag on residual threshold.
       *Done when*: appears in `evaluate` output on the canonical dataset
@@ -963,4 +963,9 @@ _(append: date — who — what landed on `main`)_
   check. **Nothing in the app or API contract changed.** Your gradient
   boosting model and the comparison panel proceed exactly as planned. Worth
   knowing for the demo Q&A
+- 2026-10-12 — Harsh — `gradient_boosting` model (branch `harsh/gb-model`).
+  Mean F1 0.677 over seeds 1–8: second to Random Forest (0.705, GB wins
+  2/8), ahead of the baseline and Isolation Forest. Same recipe as RF, with
+  shuffled 5-fold CV standing in for out-of-bag. Results and the
+  contiguous-folds dead end are in `FINDINGS.md` §1–2. No contract changes
 

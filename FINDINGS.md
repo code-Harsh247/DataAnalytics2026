@@ -23,7 +23,7 @@ Canonical dataset `data/backfill/sample_plant.csv` (18°N 80°E, 2026-09-01 →
 | `baseline_ratio` — physics ratio, no ML | shared | 0.610 | 0.638 | 0.58 | 0.73 | 0.974 |
 | `random_forest` — expected power + residual | Abhinav | 0.675 | **0.705** | 0.70 | 0.72 | **0.988** |
 | `isolation_forest` — unsupervised | Abhinav | 0.667 | 0.628 | **0.73** | 0.57 | — |
-| `gradient_boosting` — expected power + residual | Harsh | | | | | |
+| `gradient_boosting` — expected power + residual | Harsh | 0.675 | 0.677 | 0.73 | 0.64 | 0.987 |
 
 (Mean columns: averaged over 8 datasets generated with seeds 1–8 from the
 same weather, because one test week holds only ~35 faulted hours, and a
@@ -45,6 +45,18 @@ single run moves by ±0.1 F1.)
   site-irradiance error). A Sydney test plant scored F1 ≈ 0.2 for every model
   because 8 of its 10 test fault hours were one 8% fault. This is a limit of
   the physics, not a model bug.
+- **Boosting doesn't beat bagging here** (Harsh, 2026-10-12). Gradient
+  boosting uses RF's exact recipe with only the learner swapped. It ties RF
+  on seed 42 (0.675) but is second on average: 0.677 vs 0.705, winning 2 of 8
+  paired seeds. It still beats the baseline (+0.04, 4/8) and Isolation Forest
+  (+0.05, 6/8). It is more precise than RF (0.73 vs 0.70) and misses more
+  (recall 0.64 vs 0.72), because its learned threshold is looser (0.15 vs
+  0.12 relative shortfall). Its power fit is about equal to RF's (R² 0.987 vs
+  0.988), but it ranks faults slightly worse: the average precision of its
+  anomaly score is 0.76 vs RF's 0.79.
+  - *Caveat*: `min_samples_leaf` and the CV fold scheme were picked from 5
+    settings scored on these same 8 seeds, so 0.677 is slightly optimistic.
+    The conclusion, second to RF, holds for every setting tried.
 
 ## 2. Decisions and why
 
@@ -114,6 +126,23 @@ single run moves by ±0.1 F1.)
   retrospective analysis; live alerting would need a trailing window.
 - **Isolation Forest only flags hours below peer output.** It also isolates
   *over*-performing hours, which aren't faults.
+- **Gradient boosting uses shuffled 5-fold CV in place of out-of-bag**
+  (Harsh, 2026-10-12). `HistGradientBoostingRegressor` has no out-of-bag
+  predictions, and a boosted model's in-sample residuals are far too
+  small. Held-out residuals come from 5-fold CV on the train window instead.
+  - *Contiguous time-block folds were tried first and failed* (mean F1 0.51,
+    recall 0.46). Each block is a stretch of weather the model never saw, so
+    the largest held-out residuals were healthy-but-unusual hours rather than
+    faults. That inflated the threshold (0.22 vs RF's 0.12), and the
+    "drop the 10% worst-explained rows" refit dropped healthy rows and kept
+    the faulty ones: the average precision of the anomaly score fell to 0.56.
+  - Shuffled folds hold out random rows, as out-of-bag does. That fixed both
+    problems.
+  - `min_samples_leaf` is 5, not sklearn's default of 20. The default smooths
+    over the sharp peer-median relationship.
+
+  The threshold itself still uses no labels. The two settings above were
+  chosen by checking F1 on seeds 1–8, which is the caveat in section 1.
 
 **Product**
 - **The analysis API is stateless,** and the backend never writes to Supabase.
@@ -148,7 +177,7 @@ single run moves by ±0.1 F1.)
 
 ## 4. Open questions / next experiments
 
-- Gradient boosting results (Harsh).
+- ~~Gradient boosting results (Harsh).~~ Done 2026-10-12 (sections 1 and 2).
 - Would a trailing (causal) smoothing window, needed for live alerts, cost
   much recall?
 - Per-inverter thresholds instead of one global threshold?
