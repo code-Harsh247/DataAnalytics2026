@@ -1,0 +1,14 @@
+{
+  "lat": 18.0,
+  "lon": 80.0,
+  "start": "2026-09-01",
+  "end": "2026-09-30",
+  "capacity_kw": 7.5,
+  "tilt": 18.0,
+  "azimuth": 180.0,
+  "inverters": 4,
+  "temp_coefficient": -0.0038,
+  "degradation_factor": 1.0,
+  "seed": 42,
+  "out": "data/backfill/sample_plant.csv"
+}
