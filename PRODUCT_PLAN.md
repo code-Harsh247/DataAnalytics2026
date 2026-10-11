@@ -651,7 +651,7 @@ follow the rules in "Working agreement" rather than waiting on a reply.
    |---|---|
    | Abhinav | `webapp/backend/app/backfill.py`, `app/models/base.py`, `app/models/__init__.py`, `app/models/evaluate.py`, `app/models/random_forest.py`, `app/models/isolation_forest.py`, `app/analysis.py` (new), the `/api/plants/analyze` route in `main.py`, `requirements.txt`, `data/backfill/` |
    | Harsh | `app/models/gradient_boosting.py`, everything under `webapp/frontend/`, deployment config files, the CORS block in `main.py`, `README.md` |
-   | Shared (append-only) | `PRODUCT_PLAN.md` — tick your own checkboxes, append to the change log / status log |
+   | Shared (append-only) | `PRODUCT_PLAN.md` — tick your own checkboxes, append to the change log / status log; `FINDINGS.md` — model results, decisions and why, bugs found |
 
    Models are auto-discovered from `app/models/`, so adding a model never
    requires editing anyone else's file.
@@ -905,7 +905,9 @@ the backfill command (same seed → same data) once `backfill.py` is pushed.
 - Scheduled background ingestion (browser polling is fine for a demo)
 - Backend JWT auth / per-user data in FastAPI (replace hardcoded
   `LATITUDE`/`LONGITUDE`/`TARIFF_PER_KWH`)
-- Persisting backfilled history to Supabase so the live charts show 30 days
+- [x] Persisting backfilled history to Supabase so the live charts show 30
+      days — `app/seed_supabase.py` (Abhinav)
+- Align live fault-injection constants with the backfill's (see FINDINGS.md §3)
 - Server-side aggregation for energy/revenue totals
 - Automated tests
 - Custom favicon/logo
@@ -926,6 +928,17 @@ _(append: date — who — what changed — why)_
   test faults); `period.test_fault_hours` added; precision/recall/f1 can be
   `null`; validation errors are 422 (FastAPI default), unknown model is 400
 
+- 2026-10-11 — Abhinav — **edited Harsh-owned frontend files** (needed to
+  display a seeded month): `lib/plantDashboard.ts` now reads in pages
+  (Supabase caps responses at 1000 rows), charts show the newest 7 days
+  (previously the *oldest* rows, so "latest conditions" was wrong), totals
+  cover all rows; `WeatherHistoryChart`/`GenerationHistoryChart` show
+  `MM-DD HH:MM` labels and drop dots above 100 points. Function signatures
+  unchanged apart from the removed optional `limit` params
+- 2026-10-11 — Abhinav — `backfill.build_dataset()` gains optional
+  `weather`, `step_minutes`, `efficiencies` (hourly default unchanged —
+  canonical dataset byte-identical)
+
 ### Status log
 
 _(append: date — who — what landed on `main`)_
@@ -935,3 +948,7 @@ _(append: date — who — what landed on `main`)_
   Random Forest, Isolation Forest, and `/api/plants/analyze` on `main`.
   Harsh: dataset + harness are ready for the gradient boosting model, and
   the real endpoint is ready, so the mock is optional
+- 2026-10-11 — Abhinav — `FINDINGS.md` (results + decision log — add your
+  gradient boosting row there) and `app/seed_supabase.py`: fills your own
+  plant with 30 days of history. Run from `webapp/backend`:
+  `SEED_EMAIL=<login email> .venv/bin/python -m app.seed_supabase`

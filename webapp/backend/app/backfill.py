@@ -39,6 +39,11 @@ import requests
 from .synthetic_generation import DEFAULT_TEMP_COEFFICIENT, INVERTER_EFFICIENCY, NOCT_C
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+MINUTELY_15_VARS = (
+    "shortwave_radiation,direct_normal_irradiance,diffuse_radiation,"
+    "temperature_2m,wind_speed_10m"
+)
 HOURLY_VARS = (
     "shortwave_radiation,direct_normal_irradiance,diffuse_radiation,"
     "temperature_2m,wind_speed_10m,cloud_cover"
@@ -90,13 +95,45 @@ def fetch_historical_weather(lat: float, lon: float, start: str, end: str) -> pd
     return df.dropna().reset_index(drop=True)
 
 
+def fetch_recent_weather_15min(lat: float, lon: float, past_days: int) -> pd.DataFrame:
+    """Last `past_days` days up to now at 15-minute resolution, from the
+    forecast API (no archive lag, unlike fetch_historical_weather) -- the same
+    cadence as live ingestion, for seeding a real plant's history. Cloud cover
+    is only hourly there, so it's forward-filled."""
+    params = {
+        "latitude": lat, "longitude": lon,
+        "past_days": past_days, "forecast_days": 1,
+        "minutely_15": MINUTELY_15_VARS, "hourly": "cloud_cover", "timezone": "UTC",
+    }
+    resp = requests.get(FORECAST_URL, params=params, timeout=30)
+    resp.raise_for_status()
+    body = resp.json()
+    m15, hourly = body["minutely_15"], body["hourly"]
+
+    df = pd.DataFrame({
+        "timestamp": pd.to_datetime(m15["time"]).tz_localize("UTC"),
+        "ghi": m15["shortwave_radiation"],
+        "dni": m15["direct_normal_irradiance"],
+        "dhi": m15["diffuse_radiation"],
+        "air_temp": m15["temperature_2m"],
+        "wind_speed": m15["wind_speed_10m"],
+    })
+    clouds = pd.Series(
+        hourly["cloud_cover"], index=pd.to_datetime(hourly["time"]).tz_localize("UTC"),
+    )
+    df["cloud_cover"] = clouds.reindex(df["timestamp"], method="ffill").to_numpy()
+    df = df[df["timestamp"] <= pd.Timestamp.now(tz="UTC")]  # drop the forecast part
+    return df.dropna().reset_index(drop=True)
+
+
 def compute_plant_physics(
     weather: pd.DataFrame, lat: float, lon: float, tilt: float, azimuth: float,
+    step_minutes: int = 60,
 ) -> pd.DataFrame:
     """Adds solar_elevation, poa_irradiance, cell_temp. Open-Meteo radiation is
-    the mean over the *preceding* hour, so sun position is taken mid-interval."""
+    the mean over the *preceding* interval, so sun position is taken mid-interval."""
     location = pvlib.location.Location(lat, lon, tz="UTC")
-    mid = pd.DatetimeIndex(weather["timestamp"]) - pd.Timedelta(minutes=30)
+    mid = pd.DatetimeIndex(weather["timestamp"]) - pd.Timedelta(minutes=step_minutes / 2)
     solpos = location.get_solarposition(mid)
 
     poa = pvlib.irradiance.get_total_irradiance(
@@ -114,15 +151,15 @@ def compute_plant_physics(
 
 
 def inject_episodes(
-    n_hours: int, rng: np.random.Generator, start_prob: float,
-    min_hours: int, max_hours: int, min_loss: float, max_loss: float,
+    n_steps: int, rng: np.random.Generator, start_prob: float,
+    min_steps: int, max_steps: int, min_loss: float, max_loss: float,
 ) -> np.ndarray:
-    """Per-hour fractional loss for one inverter from random episodes (0 = none)."""
-    loss = np.zeros(n_hours)
+    """Per-step fractional loss for one inverter from random episodes (0 = none)."""
+    loss = np.zeros(n_steps)
     t = 0
-    while t < n_hours:
+    while t < n_steps:
         if rng.random() < start_prob:
-            duration = int(rng.integers(min_hours, max_hours + 1))
+            duration = int(rng.integers(min_steps, max_steps + 1))
             loss[t:t + duration] = rng.uniform(min_loss, max_loss)
             t += duration
         else:
@@ -135,10 +172,20 @@ def build_dataset(
     capacity_kw: float = 7.5, tilt: float = 18.0, azimuth: float = 180.0,
     inverter_count: int = 4, temp_coefficient: float = DEFAULT_TEMP_COEFFICIENT,
     degradation_factor: float = 1.0, seed: int = 42,
+    weather: pd.DataFrame | None = None, step_minutes: int = 60,
+    efficiencies: list[float] | None = None,
 ) -> pd.DataFrame:
+    """Hourly from the archive API by default. Pass `weather` (e.g. from
+    fetch_recent_weather_15min) with its `step_minutes` to build at another
+    cadence; episode durations and start rates are converted so faults look
+    the same in hours either way. `efficiencies` pins per-inverter efficiency
+    (e.g. a real plant's stored base_efficiency_factor) instead of drawing it."""
     rng = np.random.default_rng(seed)
-    plant = compute_plant_physics(fetch_historical_weather(lat, lon, start, end), lat, lon, tilt, azimuth)
+    if weather is None:
+        weather = fetch_historical_weather(lat, lon, start, end)
+    plant = compute_plant_physics(weather, lat, lon, tilt, azimuth, step_minutes)
     n = len(plant)
+    steps_per_hour = 60 // step_minutes
     per_inverter_kw = capacity_kw / inverter_count
 
     clean_dc = np.clip(
@@ -150,14 +197,19 @@ def build_dataset(
 
     frames = []
     for i in range(inverter_count):
-        efficiency = float(np.clip(rng.normal(1.0, EFFICIENCY_SPREAD_STD), 0.9, 1.1))
+        if efficiencies is not None:
+            efficiency = efficiencies[i]
+        else:
+            efficiency = float(np.clip(rng.normal(1.0, EFFICIENCY_SPREAD_STD), 0.9, 1.1))
         soiling = 1 - np.linspace(0, rng.uniform(0, MAX_SOILING_LOSS), n)
         fault_severity = inject_episodes(
-            n, rng, FAULT_START_PROB_PER_HOUR, FAULT_MIN_HOURS, FAULT_MAX_HOURS,
+            n, rng, FAULT_START_PROB_PER_HOUR / steps_per_hour,
+            FAULT_MIN_HOURS * steps_per_hour, FAULT_MAX_HOURS * steps_per_hour,
             FAULT_MIN_SEVERITY, FAULT_MAX_SEVERITY,
         )
         shading = inject_episodes(
-            n, rng, SHADING_START_PROB_PER_HOUR, SHADING_MIN_HOURS, SHADING_MAX_HOURS,
+            n, rng, SHADING_START_PROB_PER_HOUR / steps_per_hour,
+            SHADING_MIN_HOURS * steps_per_hour, SHADING_MAX_HOURS * steps_per_hour,
             SHADING_MIN_LOSS, SHADING_MAX_LOSS,
         )
         noise = np.clip(rng.normal(1.0, NOISE_STD, n), 0.85, 1.15)

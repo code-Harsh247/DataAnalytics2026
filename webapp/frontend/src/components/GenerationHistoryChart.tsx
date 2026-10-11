@@ -16,7 +16,7 @@ export interface AggregatedGenerationPoint {
 }
 
 function formatTime(iso: string): string {
-  return new Date(iso).toISOString().slice(11, 16); // HH:MM UTC
+  return new Date(iso).toISOString().slice(5, 16).replace("T", " "); // MM-DD HH:MM UTC
 }
 
 export function GenerationHistoryChart({ data }: { data: AggregatedGenerationPoint[] }) {
@@ -42,7 +42,7 @@ export function GenerationHistoryChart({ data }: { data: AggregatedGenerationPoi
             name="AC Power"
             stroke="#2563eb"
             strokeWidth={2}
-            dot={{ r: 2 }}
+            dot={chartData.length <= 100 ? { r: 2 } : false}
             isAnimationActive={false}
           />
         </LineChart>
