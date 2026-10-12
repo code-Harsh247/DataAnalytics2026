@@ -1226,3 +1226,107 @@ and reused, not modified; the new endpoints get their own routes in
    experiment (`FINDINGS.md` §5, finding 5) suggests better numbers, say so.
 2. The peer hybrid as the fixed default (M7) is post-MVP.
 
+---
+
+## Product MVP — complete plant manager
+
+*Planned 2026-10-12 (Harsh). Builds on "Working MVP" above.*
+
+### Why
+
+The Working MVP made the product revolve around one question: *which
+inverter is failing?* A plant manager tool has to answer the questions an
+owner asks every day: how much did I make, how well is the plant doing, what
+will it make this week, is anything wrong, when does it pay for itself.
+Fault detection becomes **one section of Health**, not the product.
+
+**Decided:** all five pages below are in scope; the Plant 1/2 Kaggle demo
+is **removed from the app** (frontend pages and backend routes/modules; it
+stays in git history and the presentation).
+
+### Pages
+
+| Page | Shows |
+|---|---|
+| **Overview** (home, `/`) | Power now vs expected now · energy, earnings and CO₂ avoided: today / this month / lifetime · performance ratio (today, 30 d) · today's curve: actual so far + forecast for the rest of the day · one-line health summary · gateway badge (or the pairing card if none) |
+| **Production** (`/production`) | Daily and monthly energy + earnings bars · specific yield (kWh/kWp) · per-inverter comparison (energy, share, PR, specific yield) · peak power, best/worst day · 7-day output and irradiance charts |
+| **Forecast** (`/forecast`) | Next 7 days: kWh, earnings, p10–p90 band, cloud cover · today hour by hour, forecast vs actual · accuracy of the day-ahead forecast over the last 7 days · projected month total |
+| **Health** (`/health`) | Live verdict + inverter health (from Working MVP) · availability per inverter · alert history (episodes: inverter, start, end, shortfall, kWh/earnings lost) · 30-day loss breakdown · the 30-day detection report as a tab |
+| **Finance** (`/finance`) | Earnings by month, average per day · projected annual production and earnings (a modelled typical year at this location) · payback period, if the owner enters the system cost |
+
+### Definitions (so every page agrees)
+
+- **Plant-local day**: the plant's IANA time zone from Open-Meteo
+  (`timezone=auto`), cached per plant.
+- **Expected power (physics)** per inverter = (kWp / n) × POA/1000 ×
+  (1 + γ(T_cell − 25)) × degradation × 0.97. No learned parts.
+- **Calibration** = actual ÷ physics energy over the last 14 days of
+  daylight readings. Absorbs soiling, mismatch and the site's sky bias.
+  Used by every forecast; shown on Forecast as "this plant runs at X% of
+  the physics model".
+- **Performance ratio (PR)** = AC energy ÷ (POA insolation [kWh/m²] × kWp),
+  the IEC 61724 definition. Healthy plants: ~0.75–0.85.
+- **Specific yield** = AC energy ÷ kWp.
+- **Availability** = share of daylight readings where the inverter reported
+  and produced (> 2% of its expected output).
+- **CO₂ avoided** = energy × 0.716 kg/kWh (CEA, Indian grid), labelled as
+  such.
+- **Forecast** = Open-Meteo forecast weather → physics → × calibration. **Band**
+  = p10/p90 of the last 7 days' day-ahead errors (actual ÷ forecast), from
+  Open-Meteo's *previous runs* API (the forecast as issued the day before),
+  so the accuracy shown is a real day-ahead accuracy, not hindsight.
+- **Typical year** = the last 365 days of archive weather at the location →
+  physics × calibration. Cached per plant per day.
+- **Payback** = system cost ÷ projected annual earnings (no discounting,
+  labelled as simple payback).
+- **Loss breakdown** (30 d, kWh): nameplate potential (kWp × POA insolation) →
+  temperature → conversion (3%) → downtime (missing/zero daylight readings ×
+  expected) → faults (detector-flagged shortfall) → other (soiling,
+  mismatch, shading, degradation: the remainder).
+
+### Contract 7 — plant API (all `Authorization: Bearer`, read as the user)
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/plants/{id}/overview` | `now {power_kw, expected_kw, as_of}`, `today/month/lifetime {energy_kwh, revenue, co2_kg}`, `pr {today, d30}`, `specific_yield_today`, `capacity_kw`, `timezone`, `today_curve [{t, actual_kw, forecast_kw}]` |
+| `GET /api/plants/{id}/production?days=30` | `daily [{date, energy_kwh, revenue, specific_yield, pr, peak_kw, insolation_kwh_m2}]`, `monthly [{month, energy_kwh, revenue}]`, `inverters [{label, energy_kwh, share, pr, specific_yield}]`, `best_day`, `worst_day` |
+| `GET /api/plants/{id}/forecast` | `calibration`, `days [{date, energy_kwh, revenue, p10_kwh, p90_kwh, cloud_cover}]` (7), `today [{t, forecast_kw, actual_kw}]`, `accuracy {days [{date, forecast_kwh, actual_kwh, error_pct}], mape}`, `month_projection_kwh` |
+| `GET /api/plants/{id}/health` | `availability [{label, pct}]`, `alerts [{label, start, end, ongoing, shortfall_pct, kwh_lost, revenue_lost}]`, `losses [{name, kwh}]` (+ the live verdict stays on `/status`) |
+| `GET /api/plants/{id}/finance` | `monthly [{month, revenue, energy_kwh}]`, `avg_daily_revenue`, `annual {energy_kwh, revenue}`, `system_cost`, `payback_years` |
+
+Errors as Contract 6. Each read of 30 days of readings is cached per plant
+for 60 s (after the user's access to the plant is checked), so the pages
+don't each re-read the same month.
+
+**SQL `006_finance.sql`**: `plants.system_cost` (nullable). Editable on
+Finance (owners can already update their plant under RLS).
+
+### Work items (Harsh)
+
+- [ ] P1 Backend foundations: plant time zone, physics expected power,
+      calibration, cached 30-day frame (`app/plant_metrics.py`)
+- [ ] P2 `/overview` + Overview page; app shell with nav (Overview,
+      Production, Forecast, Health, Finance), gateway badge in the header,
+      a live-data context (Realtime) that pages refresh from
+- [ ] P3 `/forecast` (+ previous-runs accuracy) + Forecast page
+- [ ] P4 `/production` + Production page
+- [ ] P5 `/health` (availability, alert episodes, losses) + Health page
+      (verdict, table, detection report moved here)
+- [ ] P6 `006_finance.sql`, `/finance` (typical year, payback) + Finance page
+      with the system-cost field
+- [ ] P7 Remove the Kaggle demo: `(dashboard)/` pages, timeline context and
+      components, `data.py`, `overview.py`, `fault_model.py`,
+      `forecast_model.py`, `solar_features.py`, their routes
+- [ ] P8 Docs: README, `DEMO.md` (tour the five pages; fault injection is one
+      stop), `FINDINGS.md` entries for the forecast accuracy measured
+
+**Done when**: on the test plant, every page loads from stored data in a
+few seconds, numbers agree across pages (today's energy on Overview =
+today's bar on Production = today's actual on Forecast), the 7-day forecast
+and its accuracy show real values, and an injected fault shows up on
+Overview's health line and in Health's alert history.
+
+**Out of scope**: cleaning/soiling advice (needs dirt build-up and rain in
+the simulator; next round), multiple plants, exports, email alerts, real
+hardware, deployment.
+
