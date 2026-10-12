@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+/* Tailwind v4 changed the default border colour from gray-200 to
+   currentColor, which turned every card, table divider and input border
+   near-black. Restore the v3 default (as the v4 upgrade guide suggests). */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

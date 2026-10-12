@@ -7,7 +7,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <AuthGate>
       <SimulationProvider>
-        <NavBar />
+        <NavBar section="demo" />
         <TimelineScrubber />
         <main className="flex-1">{children}</main>
       </SimulationProvider>

@@ -1074,7 +1074,9 @@ clients; everything goes through the functions below.
 
 **New nullable columns** (existing rows unaffected)
 
-- `generation_readings`: `dc_voltage_v`, `dc_current_a`, `inverter_temp_c`,
+- `generation_readings`: `energy_kwh` (energy in this interval; intervals
+  are no longer always 15 min, so `ac_power_kw × 0.25` stops being right),
+  `dc_voltage_v`, `dc_current_a`, `inverter_temp_c`,
   `energy_today_kwh`, `status_code` (`producing` | `standby` | `offline`),
   `fault_severity` (**label**), `source` (`browser` | `gateway`, default
   `browser`)
@@ -1086,7 +1088,7 @@ clients; everything goes through the functions below.
 |---|---|---|
 | `create_pairing_code(plant_id)` → text | logged-in owner | creates or rotates the plant's gateway row with a fresh 15-min code |
 | `pair_gateway(code, serial)` → jsonb | gateway (anon key) | checks the code, creates the plant's inverters if missing, issues a random 32-byte token (stores only its hash), clears the code. Returns `{token, plant: <the plants row>, inverters: [{id, label, base_efficiency_factor}]}`; the gateway derives the physics inputs with the existing `resolve_plant_defaults()` (`app/seed_supabase.py`) |
-| `gateway_state(token)` → jsonb | gateway | `{last_recorded_at}`, so the gateway knows what to catch up |
+| `gateway_state(token)` → jsonb | gateway | `{plant, inverters, last_recorded_at}`: current config (the owner may have edited the plant) and where to resume catching up |
 | `ingest_telemetry(token, weather jsonb, readings jsonb)` → jsonb | gateway | checks the token; inserts rows for **that plant's inverters only**, skipping existing timestamps (existing unique keys); updates `last_seen_at`; returns `{inserted_weather, inserted_readings}`. Max 2,000 readings per call |
 | `plant_totals(plant_id)` → jsonb | logged-in owner | energy, revenue and reading count, computed in SQL (replaces paging every row into the browser) |
 
@@ -1098,7 +1100,8 @@ so the dashboard can subscribe. Realtime respects RLS.
 ```jsonc
 // readings: one per inverter per interval
 { "inverter_id": "uuid", "recorded_at": "2026-10-12T09:05:00Z",  // UTC, end of interval
-  "ac_power_kw": 1.42, "dc_power_kw": 1.49,
+  "ac_power_kw": 1.42, "dc_power_kw": 1.49, "energy_kwh": 0.1183,
+  "revenue_per_interval": 0.53,
   "dc_voltage_v": 361.2, "dc_current_a": 4.12,
   "inverter_temp_c": 41.5, "cell_temp_c": 47.9, "poa_irradiance_wm2": 812.0,
   "energy_today_kwh": 6.31, "status_code": "producing",
@@ -1145,7 +1148,7 @@ backend uses it to read Supabase as that user.
 { "as_of": "2026-10-12T09:10:00Z", "model": "random_forest",
   "gateway": { "connected": true, "last_seen_at": "...", "serial": "SIM-GW-4F2A" },
   "inverters": [
-    { "label": "INV-3", "state": "underperforming",   // ok | underperforming | offline | no_data
+    { "label": "INV-3", "state": "underperforming",   // ok | underperforming | offline | learning | no_data
       "shortfall_pct": 28.5, "since": "2026-10-12T08:40:00Z",
       "est_kwh_lost_24h": 2.1, "est_revenue_lost_24h": 9.45 } ] }
 ```
@@ -1159,7 +1162,9 @@ backend uses it to read Supabase as that user.
   A fault injected in a demo is visible after ~6 readings.
 - `underperforming`: the smoothed shortfall is above the model's threshold
   for the last 3 daylight readings. `offline`: no reading for more than
-  3 × interval. `since` = the start of the current run of flagged readings.
+  3 × interval (at least 2 min). `learning`: under ~4 days of history
+  before the last 24 h to train on. `since` = the start of the current run
+  of flagged readings.
 - Night: `state` stays at its last daylight value, with no new flags
 
 ### Work items
@@ -1170,10 +1175,26 @@ backend uses it to read Supabase as that user.
 | M2 | **Virtual gateway** `webapp/backend/gateway/` (`python -m gateway pair/run`). Reuses the physics in `app.synthetic_generation` / `app.backfill` (import, don't copy) and the backfill's fault constants. Token kept in `gateway/.gateway.json` (gitignored). Console commands: `status`, `inject INV-n <pct> [duration]`, `clear INV-n`, `offline [duration]`, `quit` | Harsh | Pairs with a code; catches up a 30-day gap; live readings land at `--interval`; `inject` shows up in the readings |
 | M3 | **Pairing + live dashboard**: a "Connect your inverter" step after plant setup (code, the command to run, live wait); a connection badge (Connected / Offline · last seen); a Realtime subscription so charts and KPIs update without refreshing; totals from `plant_totals`; every device labelled **"Simulated device (virtual gateway)"** | Harsh | Done-when steps 1–3 and 5 work in the browser |
 | M4 | **Remove the browser simulation**: `SimulationIngestion` and the tick/fault code in `lib/generation.ts` (keep `resolvePlantDefaults`). The inverter status badge comes from 6b, never from `fault_active` | Harsh | No writes from the browser; grep finds no UI read of `fault_active` outside the evaluation table |
-| M5 | **6a: analysis on stored readings** (`app/analysis.py` + new route) | **Abhinav** (or Harsh with his OK) | Same response shape; on a gateway-fed plant, the verdicts match the dashboard |
-| M6 | **6b: `/status`** (backend) + a **verdict banner** on the dashboard ("INV-3 is under-producing ~28% since 08:40, ≈9/day" or "All 4 inverters healthy") | backend **Abhinav**, banner Harsh | Done-when step 4 |
-| M7 | **One fixed model**, chosen once on the canonical benchmark, not per run. `random_forest` today. If Abhinav's peer hybrid (`FINDINGS.md` §5) is added as `app/models/peer_hybrid.py` and wins on seeds 1–8, it becomes the default for both 6a and 6b | Abhinav | The default in 6a/6b is a constant; results recorded in `FINDINGS.md` |
+| M5 | **6a: analysis on stored readings**: new `app/plant_data.py` (stored rows → Contract 1 frame) and `app/plant_analysis.py`, reusing `analysis.py`'s summaries without modifying it; new route | Harsh | Same response shape; on a gateway-fed plant, the verdicts match the dashboard |
+| M6 | **6b: `/status`** (backend) + a **verdict banner** on the dashboard ("INV-3 is under-producing ~28% since 08:40, ≈9/day" or "All 4 inverters healthy"); new `app/plant_status.py` | Harsh | Done-when step 4 |
+| M7 | **One fixed model**, chosen once on the canonical benchmark, not per run. `random_forest` today. If Abhinav's peer hybrid (`FINDINGS.md` §5) is added as `app/models/peer_hybrid.py` and wins on seeds 1–8, it becomes the default for both 6a and 6b | Harsh (peer hybrid: post-MVP) | The default in 6a/6b is a constant; results recorded in `FINDINGS.md` |
 | M8 | **Docs and cleanup**: `DEMO.md` rewritten around pair → live → inject → detect; README (gateway, architecture); historical Kaggle demo moved out of the main nav; `FINDINGS.md` entry with stored-data results | Harsh | `DEMO.md` runs end to end on a fresh account |
+
+**Progress** (2026-10-12, Harsh): all eight built. Verified live on the test
+plant: pair (and re-pair via "Replace gateway") → catch-up → Realtime
+readings → `inject INV-3 30` flagged ~1 min later as "under-producing ~27%"
+→ `offline 3m` shows Offline / Not reporting, then recovers → 30-day
+analysis on stored readings. Not verified: a brand-new account end to end
+(the pairing UI was tested via "Replace gateway" on the existing account).
+
+- [x] M1 `005_devices.sql` (run in Supabase)
+- [x] M2 virtual gateway
+- [x] M3 pairing + live dashboard
+- [x] M4 browser simulation removed; health from the detector
+- [x] M5 analysis on stored readings
+- [x] M6 `/status` + verdict banner
+- [x] M7 fixed default model (Random Forest; peer hybrid post-MVP)
+- [x] M8 `DEMO.md`, README, historical demo out of the main nav, `FINDINGS.md`
 
 **Order**: M1 → M2 → (M3 + M4) alongside M5 → M6 → M7 → M8. M2 and M5 are
 independent once M1 is in: M5 can develop against a plant filled by
@@ -1193,12 +1214,15 @@ presentation).
   retrospective analysis.
 - Still anon key + user JWT + device token. No service_role key.
 
-### Open questions (Abhinav)
+### Ownership
 
-1. OK for you to own M5–M7, or should Harsh take M5/M6 against these
-   contracts?
-2. The status rule in 6b (trailing median of 6 readings, 3 consecutive
-   flagged daylight readings): good enough, or do you have numbers from your
-   trailing-window experiment (`FINDINGS.md` §5, finding 5) that suggest otherwise?
-3. Peer hybrid as the fixed default (M7): worth it for this MVP, or after?
+Decided 2026-10-12: **Harsh builds all of M1–M8.** Abhinav's files
+(`analysis.py`, `backfill.py`, `seed_supabase.py`, `models/`) are imported
+and reused, not modified; the new endpoints get their own routes in
+`main.py`. FYI for Abhinav, no action needed:
+
+1. The status rule in 6b (trailing median of 6 readings, 3 consecutive
+   flagged daylight readings) is a first guess. If your trailing-window
+   experiment (`FINDINGS.md` §5, finding 5) suggests better numbers, say so.
+2. The peer hybrid as the fixed default (M7) is post-MVP.
 

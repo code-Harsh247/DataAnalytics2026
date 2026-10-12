@@ -1,11 +1,12 @@
 import pandas as pd
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import fault_model, forecast_model, overview, weather
-from . import analysis, synthetic_generation
+from . import analysis, plant_analysis, plant_status, synthetic_generation
 from .data import load_plant
+from .plant_data import AuthError, InsufficientData, NotFound, UserSupabase
 
 app = FastAPI(title="Solar Plant Manager API")
 
@@ -99,3 +100,37 @@ def analyze_plant(req: analysis.AnalyzeRequest):
         raise HTTPException(400, str(e))
     except requests.RequestException as e:
         raise HTTPException(502, f"Weather provider error: {e}")
+
+
+# ---- A user's own plant (Contract 6): reads Supabase as the caller, so the
+# ---- request must carry their access token.
+
+def _call_as_user(authorization: str | None, fn):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(401, "Missing Authorization: Bearer <access token>")
+    try:
+        return fn(UserSupabase(authorization.split(" ", 1)[1]))
+    except AuthError as e:
+        raise HTTPException(401, str(e))
+    except NotFound as e:
+        raise HTTPException(404, str(e))
+    except InsufficientData as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Database error: {e}")
+
+
+@app.post("/api/plants/{plant_id}/analyze")
+def analyze_stored_plant(
+    plant_id: str,
+    req: plant_analysis.PlantAnalyzeRequest = plant_analysis.PlantAnalyzeRequest(),
+    authorization: str | None = Header(default=None),
+):
+    return _call_as_user(authorization, lambda db: plant_analysis.analyze_stored(db, plant_id, req))
+
+
+@app.get("/api/plants/{plant_id}/status")
+def get_plant_status(plant_id: str, authorization: str | None = Header(default=None)):
+    return _call_as_user(authorization, lambda db: plant_status.plant_status(db, plant_id))

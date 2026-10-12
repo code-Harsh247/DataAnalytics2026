@@ -153,6 +153,32 @@ single run moves by ±0.1 F1.)
   email and password, so Row Level Security applies exactly as in the browser,
   with no admin key.
 
+**Working MVP** (Harsh, 2026-10-12; `PRODUCT_PLAN.md` "Working MVP")
+- **Data now comes from a gateway, not the browser.** A simulated gateway
+  (`python -m gateway`) pairs with a 15-minute code, holds its own device
+  token (stored only as a sha256 hash), and uploads through security-definer
+  SQL functions. Everything still runs on the anon key.
+- **The analysis and the verdict read the plant's stored readings** (as the
+  signed-in user, via their JWT), so the dashboard and the analysis finally
+  describe the same data. Before this, `/analyze` built its own synthetic
+  month.
+- **The dashboard used to show the answer key.** Its "Fault active" badge read
+  the injected fault label. Status now comes only from the detector; labels
+  are used only to score accuracy.
+- **Live verdict = Random Forest trained on history older than 24 h, scored
+  on raw readings with a *trailing* median of 6 and 3 flagged readings in a
+  row.** Trailing, because a live verdict can't look ahead (the analysis
+  keeps its centred window). Measured on the test plant at a 30 s interval: a
+  30% fault injected at 03:19:00 was flagged from 03:20:00 and shown on the
+  dashboard by 03:21:30. At the default 5-minute interval, expect ~15–20 min.
+  The reported shortfall (27–28%) matched the injected 30%.
+- **The default model is fixed** (Random Forest), no longer the best F1 of
+  each run, which was selection on the test window.
+- **Caveat on stored-data scores:** the test plant's 30-day analysis scores
+  F1 0.85 (RF). This is **not comparable** to section 1: its history mixes
+  seeded data with the older browser pipeline, whose faults were bigger
+  (15–50%) and so easier to catch. Section 1 stays the benchmark.
+
 ## 3. Bugs found along the way
 
 - **`weather.py` requested the wrong sunlight value.** It asked Open-Meteo for

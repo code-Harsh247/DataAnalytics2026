@@ -38,21 +38,24 @@ Two things run side by side in this repo:
    drive real solar-position physics, panel type sets a real temperature
    coefficient, commissioning date drives degradation, area is a capacity
    fallback, tariff computes real revenue
-3. **Live ingestion** (every 15 min while the app is open): fetches real
-   current weather for the plant's coordinates (Open-Meteo), then generates
-   synthetic per-inverter power output from that weather via `pvlib`
-   plane-of-array irradiance + a standard temperature-derating model —
-   multiple virtual inverters with persistent efficiency variance and
-   occasional realistic multi-hour fault episodes
-4. **A live dashboard** for that real, accumulating data — energy/revenue to
-   date, active faults, weather and generation history charts, per-inverter
-   status
-5. **30-day fault analysis** (needs ≥ 2 inverters): the backend pulls 30 days
-   of real historical weather for the plant, generates a month of synthetic
-   output with injected, labeled faults, trains every detection model, and
-   returns:
-   - expected vs. actual output, with flagged hours (and the true faults as
-     an optional overlay)
+3. **Connect the plant's gateway** with a 15-minute pairing code. The
+   gateway is a **separate, simulated device** (`python -m gateway`): it
+   behaves like a real inverter data logger, holds its own device token, and
+   pushes per-inverter telemetry (power, DC voltage/current, temperatures,
+   energy counters) generated from **real weather** at the plant (Open-Meteo)
+   with `pvlib` physics, measurement noise, shading and fault episodes. It
+   catches up on readings it missed while off, and a console lets you
+   `inject` a fault or take its link `offline` during a demo
+4. **A live dashboard**: Connected/Offline badge, readings arriving without
+   a refresh (Supabase Realtime), energy/revenue to date, weather and output
+   history, and a **live verdict** per inverter ("INV-3 is under-producing by
+   ~27% since 08:50, ≈1.87 lost in the last 24 h"). The verdict comes from a
+   model trained on the plant's own history, never from the simulator's
+   fault labels
+5. **30-day fault analysis** (needs ≥ 2 inverters): runs every detection
+   model over the readings stored for the plant and returns:
+   - expected vs. actual output, with flagged hours (and the injected faults
+     as an optional overlay)
    - per-inverter status with kWh and revenue lost
    - a model comparison — precision, recall, F1 against the true labels, and
      R² of the expected-power fit — where you can switch which model's
@@ -93,26 +96,29 @@ no-ML peer comparison reaches 0.78.
 
 ## Current state
 
-Phases 0–15 plus the hackathon MVP's ML pipeline and analysis panel are
-built and verified end to end. See [`PRODUCT_PLAN.md`](PRODUCT_PLAN.md) for
-the phase-by-phase log; this README is the summary.
+Phases 0–15, the hackathon MVP's ML pipeline, and the **Working MVP**
+(simulated gateway, live verdict, analysis on stored data) are built and
+verified end to end. See [`PRODUCT_PLAN.md`](PRODUCT_PLAN.md) for the
+phase-by-phase log; this README is the summary.
 
 **Solid:**
-- Backend API serving the historical demo's ML pipeline (FastAPI)
 - Real Supabase auth, gating the dashboard behind a configured plant
 - Plant setup with a full, genuinely-used field set
-- Real weather ingestion + physically-grounded synthetic generation,
-  including stateful fault injection
-- A live dashboard for a user's real accumulating data
+- Gateway pairing with per-device tokens (stored hashed); telemetry through
+  database functions, so the whole system runs on the public anon key — no
+  admin key anywhere
+- A simulated gateway with catch-up, store-and-forward and a fault console
+- A live dashboard (Realtime) with a per-inverter verdict from the detector
 - Historical backfill, an evaluation harness, four anomaly-detection models,
-  and `POST /api/plants/analyze`, wired into the dashboard's analysis panel
+  and the 30-day analysis on the plant's stored readings
+- The backend reads Supabase as the signed-in user (their JWT), so row-level
+  security applies to it too
 
 **Not done yet:**
+- Real hardware: the only gateway is the simulated one (a CSV import of a
+  real inverter's export would be the first step)
+- Email/push alerts (the verdict is in-app only)
 - Deployment (currently local only)
-- Real scheduled ingestion: data is currently collected by client-side
-  polling while a browser tab is open, not by a background job
-- The backend has no auth of its own. `/analyze` is stateless and takes the
-  plant's specs in the request; it never reads or writes user data
 
 ## Architecture
 
@@ -127,7 +133,11 @@ webapp/
       backfill.py                      30 days of archive weather -> labeled synthetic dataset
       models/                          anomaly models (auto-discovered) + evaluate.py harness
       analysis.py                      POST /api/plants/analyze: backfill, train all models, compare
+      plant_data.py                    a user's stored readings (read as that user) -> model dataset
+      plant_analysis.py                POST /api/plants/{id}/analyze: the 30-day analysis on stored data
+      plant_status.py                  GET  /api/plants/{id}/status: the live per-inverter verdict
       seed_supabase.py                 fill your own plant with 30 days of history
+    gateway/                           the simulated gateway: python -m gateway pair|run
     data/backfill/sample_plant.csv     canonical evaluation dataset
   frontend/          Next.js (App Router) + Tailwind + Recharts
     src/app/
@@ -182,7 +192,18 @@ cd webapp/frontend
 npm install && npm run dev
 ```
 
-Open <http://localhost:3000>. For a guided walkthrough, see [`DEMO.md`](DEMO.md).
+Open <http://localhost:3000>, sign up, set up a plant, and click **Get
+pairing code**. Then start the simulated gateway in a third terminal:
+
+```bash
+cd webapp/backend
+.venv/bin/python -m gateway pair <CODE>     # Windows: .venv/Scripts/python
+.venv/bin/python -m gateway run             # a reading every 5 min; --interval 30 for a demo
+```
+
+While it runs, type `inject INV-3 30` to break an inverter, `clear` to fix
+it, `offline 3m` to drop its link, or `help`. For a guided walkthrough, see
+[`DEMO.md`](DEMO.md).
 
 **Useful extras** (from `webapp/backend`; on Windows swap `.venv/bin` for
 `.venv/Scripts`):
@@ -201,9 +222,10 @@ product flow doesn't need them.
 
 ## Next phase
 
-- **Deploy**: backend on Render, frontend on Vercel
+- **Real data in**: import a CSV export from a real inverter portal, then a
+  real gateway
 - **Peer-comparison model**: promote the exploratory peer hybrid from
-  `FINDINGS.md` §5 to a fifth model (it beats Random Forest, 0.78 vs 0.71)
-- **Scheduled ingestion**: a background job instead of browser polling
-- **Live alerting**: a trailing rather than centered smoothing window, so
-  faults can be flagged as they happen instead of only in retrospect
+  `FINDINGS.md` §5 to a fifth model and the default (it beats Random Forest,
+  0.78 vs 0.71)
+- **Alerts**: email/push when the verdict changes
+- **Deploy**: backend on Render, frontend on Vercel
