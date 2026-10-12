@@ -943,6 +943,10 @@ _(append: date — who — what changed — why)_
 - 2026-10-11 — Abhinav — `backfill.build_dataset()` gains optional
   `weather`, `step_minutes`, `efficiencies` (hourly default unchanged —
   canonical dataset byte-identical)
+- 2026-10-12 — Harsh — **proposed, not built yet**: Contracts 4–6 in "Working
+  MVP" at the end of this file. All additive: new tables/columns/RPCs, two
+  new plant-scoped endpoints. Contract 3 (`POST /api/plants/analyze`) is
+  unchanged and keeps working
 
 ### Status log
 
@@ -970,4 +974,231 @@ _(append: date — who — what landed on `main`)_
   2/8), ahead of the baseline and Isolation Forest. Same recipe as RF, with
   shuffled 5-fold CV standing in for out-of-bag. Results and the
   contiguous-folds dead end are in `FINDINGS.md` §1–2. No contract changes
+- 2026-10-12 — Harsh — merged #3 (analysis panel), #4 (gradient boosting),
+  #5 (`DEMO.md`, README, live fault rates aligned with the backfill, "My
+  plant" nav link). Then **planned the "Working MVP" below — Abhinav, please
+  read its "Open questions" before building on `analysis.py`**
+
+---
+
+## Working MVP — connected (simulated) hardware
+
+*Planned 2026-10-12 (Harsh). Nothing below is built yet.*
+
+### Why
+
+The hackathon MVP above works end to end, but it's a demo of a product, not
+a product. An honest review found:
+
+1. **The analysis doesn't analyse the user's plant.** `POST /api/plants/analyze`
+   generates its own fresh synthetic month instead of reading the readings
+   stored in Supabase. The dashboard and the analysis are two unrelated
+   simulations: the analysis can call INV-3 "critical" while the dashboard's
+   history shows it healthy.
+2. **Data arrives only while a browser tab is open**, and two open tabs both
+   inject faults. There's no notion of a device being connected.
+3. **The dashboard shows the answer key.** The inverter "Fault active" badge
+   reads the injected fault label. Real hardware never reports "I'm faulty";
+   status must come from detection.
+4. **No verdict.** "Know before it costs you money" needs the app to *say*
+   which inverter is losing output now. Today you click a button to look at
+   the past month.
+5. **The default model is picked on the test week** (best F1 per run), so the
+   "winner" changes from run to run. That's selection on test data.
+
+### Goal
+
+One loop, on the user's own data, every time they open the app:
+**my plant's data → which inverter is losing output → what it's costing me.**
+
+The inverters stay simulated, but they behave like real hardware: a separate
+**virtual gateway** process pushes telemetry through the same kind of
+interface a real data logger would. Swapping in real hardware later means
+writing a new gateway, not changing the app.
+
+**Done when** (the demo loop, on a fresh account, in daylight at the plant):
+
+1. Sign up → set up plant → the app shows a **pairing code**
+2. `python -m gateway pair <CODE>` then `python -m gateway run` → within
+   ~10 s the dashboard says **Connected**, and ~30 days of history appear
+   (the gateway catches up)
+3. New readings appear **without refreshing**
+4. `inject INV-3 30%` in the gateway console → within a few readings the
+   dashboard says **"INV-3 is under-producing ~30%, ≈X/day"**
+5. `offline` → the dashboard says **Offline · last seen N min ago**
+6. The 30-day analysis runs on the **stored** readings, and its verdict for
+   each inverter agrees with the dashboard
+
+**Not in this MVP**: real hardware or CSV import (first thing after),
+email/push alerts (need a scheduler), deployment, multiple plants per
+account, a mobile layout pass.
+
+### Architecture
+
+```
+ virtual gateway (python -m gateway)          Supabase                     app
+ ┌──────────────────────────────┐   RPC    ┌──────────────────┐  Realtime  ┌───────────────┐
+ │ 4 virtual inverters          │ ───────▶ │ gateways         │ ─────────▶ │ dashboard     │
+ │ real weather (Open-Meteo)    │  token   │ weather_readings │            │ (Next.js)     │
+ │ physics (app.synthetic_*)    │          │ generation_...   │ ◀──────┐   └───────┬───────┘
+ │ fault state + console        │          └──────────────────┘   RLS  │           │ Bearer
+ └──────────────────────────────┘                    ▲                 │           ▼
+                                                     └──── user JWT ── FastAPI: /status, /analyze
+```
+
+- The gateway is a **separate process** with its own credentials (a device
+  token). It never sees the user's password.
+- The browser **stops generating data**; it only reads.
+- The backend reads Supabase **as the user** (their JWT + the anon key), so
+  row-level security applies. Still no service_role key anywhere.
+
+### Contract 4 — Device link (`webapp/supabase/005_devices.sql`)
+
+Run once in the Supabase SQL Editor, like 001–004. Uses `pgcrypto`
+(enabled by default on Supabase, schema `extensions`).
+
+**New table `gateways`** (one per plant)
+
+| column | type | notes |
+|---|---|---|
+| `id` | uuid pk | |
+| `plant_id` | uuid, unique, fk → plants (cascade) | |
+| `serial` | text | reported by the gateway, e.g. `SIM-GW-4F2A` |
+| `token_hash` | text | sha256 of the device token; the token itself is never stored |
+| `pairing_code` | text, unique, nullable | 6 characters, cleared once used |
+| `pairing_expires_at` | timestamptz | code valid for 15 min |
+| `paired_at`, `last_seen_at`, `created_at` | timestamptz | |
+
+RLS: owners can `select` their plant's row. No direct insert/update from
+clients; everything goes through the functions below.
+
+**New nullable columns** (existing rows unaffected)
+
+- `generation_readings`: `dc_voltage_v`, `dc_current_a`, `inverter_temp_c`,
+  `energy_today_kwh`, `status_code` (`producing` | `standby` | `offline`),
+  `fault_severity` (**label**), `source` (`browser` | `gateway`, default
+  `browser`)
+- `weather_readings`: `wind_speed_kmh`, `source`
+
+**Functions** (`security definer`, `search_path = public`)
+
+| function | caller | does |
+|---|---|---|
+| `create_pairing_code(plant_id)` → text | logged-in owner | creates or rotates the plant's gateway row with a fresh 15-min code |
+| `pair_gateway(code, serial)` → jsonb | gateway (anon key) | checks the code, creates the plant's inverters if missing, issues a random 32-byte token (stores only its hash), clears the code. Returns `{token, plant: <the plants row>, inverters: [{id, label, base_efficiency_factor}]}`; the gateway derives the physics inputs with the existing `resolve_plant_defaults()` (`app/seed_supabase.py`) |
+| `gateway_state(token)` → jsonb | gateway | `{last_recorded_at}`, so the gateway knows what to catch up |
+| `ingest_telemetry(token, weather jsonb, readings jsonb)` → jsonb | gateway | checks the token; inserts rows for **that plant's inverters only**, skipping existing timestamps (existing unique keys); updates `last_seen_at`; returns `{inserted_weather, inserted_readings}`. Max 2,000 readings per call |
+| `plant_totals(plant_id)` → jsonb | logged-in owner | energy, revenue and reading count, computed in SQL (replaces paging every row into the browser) |
+
+Plus: `alter publication supabase_realtime add table generation_readings, gateways;`
+so the dashboard can subscribe. Realtime respects RLS.
+
+### Contract 5 — Telemetry payload (gateway → `ingest_telemetry`)
+
+```jsonc
+// readings: one per inverter per interval
+{ "inverter_id": "uuid", "recorded_at": "2026-10-12T09:05:00Z",  // UTC, end of interval
+  "ac_power_kw": 1.42, "dc_power_kw": 1.49,
+  "dc_voltage_v": 361.2, "dc_current_a": 4.12,
+  "inverter_temp_c": 41.5, "cell_temp_c": 47.9, "poa_irradiance_wm2": 812.0,
+  "energy_today_kwh": 6.31, "status_code": "producing",
+  "fault_active": false, "fault_severity": 0.0 }   // labels: evaluation only
+// weather: one per interval
+{ "recorded_at": "...", "temperature_c": 29.4, "cloud_cover_pct": 40,
+  "ghi_wm2": 690, "dni_wm2": 540, "dhi_wm2": 160, "wind_speed_kmh": 9.5 }
+```
+
+**Rule:** `fault_active` / `fault_severity` are ground truth for scoring
+only. **No UI element and no detector may read them.** The only place they
+appear is the "how accurate is this?" evaluation (precision/recall).
+
+Intervals: live readings every **300 s** by default (`--interval`; use ~30 s
+for a demo); catch-up runs at 15-min resolution, at most 30 days back.
+
+### Contract 6 — Plant-scoped API (FastAPI)
+
+Both endpoints require `Authorization: Bearer <Supabase access token>`. The
+backend uses it to read Supabase as that user.
+
+**6a. `POST /api/plants/{plant_id}/analyze`**: the 30-day analysis, on
+**stored** readings.
+
+- Request: `{ "days": 30, "model": "random_forest" }` (both optional;
+  `days` 7–90)
+- Builds a Contract 1-shaped hourly frame from stored rows:
+  - hourly means of power;
+  - weather joined on time;
+  - `solar_elevation` and `is_daylight` from pvlib;
+  - `poa_irradiance` and `cell_temp` from the stored readings;
+  - labels from `fault_active` / `fault_severity`.
+
+  Then the same time split, training and scoring as Contract 3.
+- Response: **same shape as Contract 3**, plus
+  `"source": "stored"` and `"coverage": {"expected_rows", "present_rows"}`
+- Default model: **fixed** (`random_forest`; see M7), not best-F1 per run
+- Errors: 401 missing/invalid token, 404 plant not found or not yours,
+  409 not enough data (`detail` says how many days are present)
+
+**6b. `GET /api/plants/{plant_id}/status`**: the live verdict.
+
+```jsonc
+{ "as_of": "2026-10-12T09:10:00Z", "model": "random_forest",
+  "gateway": { "connected": true, "last_seen_at": "...", "serial": "SIM-GW-4F2A" },
+  "inverters": [
+    { "label": "INV-3", "state": "underperforming",   // ok | underperforming | offline | no_data
+      "shortfall_pct": 28.5, "since": "2026-10-12T08:40:00Z",
+      "est_kwh_lost_24h": 2.1, "est_revenue_lost_24h": 9.45 } ] }
+```
+
+- Trains the fixed model on stored history up to 24 h ago, caches it per
+  plant in memory, and retrains when the cache is more than 6 h old
+- Scores the most recent readings **at their native interval**, with a
+  **trailing** median of the last 6 readings. It must be trailing, not
+  centred: live status can't use future readings, see `FINDINGS.md` §5,
+  finding 5.
+  A fault injected in a demo is visible after ~6 readings.
+- `underperforming`: the smoothed shortfall is above the model's threshold
+  for the last 3 daylight readings. `offline`: no reading for more than
+  3 × interval. `since` = the start of the current run of flagged readings.
+- Night: `state` stays at its last daylight value, with no new flags
+
+### Work items
+
+| # | Item | Owner | Done when |
+|---|---|---|---|
+| M1 | `005_devices.sql`: `gateways`, new columns, the 5 functions, Realtime publication | Harsh | Run in the SQL Editor; `pair_gateway` with a bad code fails; `ingest_telemetry` with another plant's inverter id inserts nothing |
+| M2 | **Virtual gateway** `webapp/backend/gateway/` (`python -m gateway pair/run`). Reuses the physics in `app.synthetic_generation` / `app.backfill` (import, don't copy) and the backfill's fault constants. Token kept in `gateway/.gateway.json` (gitignored). Console commands: `status`, `inject INV-n <pct> [duration]`, `clear INV-n`, `offline [duration]`, `quit` | Harsh | Pairs with a code; catches up a 30-day gap; live readings land at `--interval`; `inject` shows up in the readings |
+| M3 | **Pairing + live dashboard**: a "Connect your inverter" step after plant setup (code, the command to run, live wait); a connection badge (Connected / Offline · last seen); a Realtime subscription so charts and KPIs update without refreshing; totals from `plant_totals`; every device labelled **"Simulated device (virtual gateway)"** | Harsh | Done-when steps 1–3 and 5 work in the browser |
+| M4 | **Remove the browser simulation**: `SimulationIngestion` and the tick/fault code in `lib/generation.ts` (keep `resolvePlantDefaults`). The inverter status badge comes from 6b, never from `fault_active` | Harsh | No writes from the browser; grep finds no UI read of `fault_active` outside the evaluation table |
+| M5 | **6a: analysis on stored readings** (`app/analysis.py` + new route) | **Abhinav** (or Harsh with his OK) | Same response shape; on a gateway-fed plant, the verdicts match the dashboard |
+| M6 | **6b: `/status`** (backend) + a **verdict banner** on the dashboard ("INV-3 is under-producing ~28% since 08:40, ≈9/day" or "All 4 inverters healthy") | backend **Abhinav**, banner Harsh | Done-when step 4 |
+| M7 | **One fixed model**, chosen once on the canonical benchmark, not per run. `random_forest` today. If Abhinav's peer hybrid (`FINDINGS.md` §5) is added as `app/models/peer_hybrid.py` and wins on seeds 1–8, it becomes the default for both 6a and 6b | Abhinav | The default in 6a/6b is a constant; results recorded in `FINDINGS.md` |
+| M8 | **Docs and cleanup**: `DEMO.md` rewritten around pair → live → inject → detect; README (gateway, architecture); historical Kaggle demo moved out of the main nav; `FINDINGS.md` entry with stored-data results | Harsh | `DEMO.md` runs end to end on a fresh account |
+
+**Order**: M1 → M2 → (M3 + M4) alongside M5 → M6 → M7 → M8. M2 and M5 are
+independent once M1 is in: M5 can develop against a plant filled by
+`seed_supabase.py`.
+
+**Demo caveat**: detection needs sunlight. Present when it's daytime at the
+demo plant's location (or set the plant somewhere it is daytime during the
+presentation).
+
+### Rules
+
+- **Simulated, and labelled as such.** In the UI, `DEMO.md` and the
+  presentation, the device is a *virtual gateway generating telemetry from
+  real weather*. Never claim real hardware.
+- Labels (`fault_active`, `fault_severity`) are for evaluation only (Contract 5).
+- Live status uses trailing windows only; centred smoothing stays in the
+  retrospective analysis.
+- Still anon key + user JWT + device token. No service_role key.
+
+### Open questions (Abhinav)
+
+1. OK for you to own M5–M7, or should Harsh take M5/M6 against these
+   contracts?
+2. The status rule in 6b (trailing median of 6 readings, 3 consecutive
+   flagged daylight readings): good enough, or do you have numbers from your
+   trailing-window experiment (`FINDINGS.md` §5, finding 5) that suggest otherwise?
+3. Peer hybrid as the fixed default (M7): worth it for this MVP, or after?
 
