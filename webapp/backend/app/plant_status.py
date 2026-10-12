@@ -18,6 +18,7 @@ import pandas as pd
 from .models.base import LABEL_COLUMNS
 from .models.random_forest import RandomForestModel
 from .plant_data import InsufficientData, UserSupabase, load_hourly, native_frame
+from .plant_metrics import plant_timezone
 
 MODEL_NAME = "random_forest"
 HISTORY_DAYS = 30
@@ -83,6 +84,7 @@ def plant_status(db: UserSupabase, plant_id: str) -> dict:
                      and now - pd.Timestamp(gateway["last_seen_at"]) <= offline_after)
     result = {
         "as_of": _iso(now),
+        "timezone": plant_timezone(plant["latitude"], plant["longitude"]),
         "model": MODEL_NAME,
         "gateway": None if gateway is None else {
             "connected": connected, "serial": gateway.get("serial"),

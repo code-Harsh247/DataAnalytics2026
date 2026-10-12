@@ -68,6 +68,13 @@ class UserSupabase:
             if len(page) < PAGE_SIZE:
                 return rows
 
+    def rpc(self, fn: str, **params):
+        resp = self.session.post(f"{self.url}/rest/v1/rpc/{fn}", json=params, timeout=30)
+        if resp.status_code in (401, 403):
+            raise AuthError("Session expired or invalid -- sign in again.")
+        resp.raise_for_status()
+        return resp.json()
+
     def plant(self, plant_id: str) -> dict:
         rows = self.select("plants", {"select": "*", "id": f"eq.{plant_id}"})
         if not rows:
@@ -88,7 +95,7 @@ class UserSupabase:
                  until: pd.Timestamp | None = None) -> pd.DataFrame:
         params = {
             "select": "inverter_id,recorded_at,ac_power_kw,dc_power_kw,cell_temp_c,"
-                      "poa_irradiance_wm2,energy_kwh,fault_active,fault_severity",
+                      "poa_irradiance_wm2,energy_kwh,revenue_per_interval,fault_active,fault_severity",
             "inverter_id": f"in.({','.join(inverter_ids)})",
             "order": "recorded_at.asc,inverter_id.asc",
         }

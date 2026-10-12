@@ -1303,22 +1303,33 @@ Finance (owners can already update their plant under RLS).
 
 ### Work items (Harsh)
 
-- [ ] P1 Backend foundations: plant time zone, physics expected power,
+- [x] P1 Backend foundations: plant time zone, physics expected power,
       calibration, cached 30-day frame (`app/plant_metrics.py`)
-- [ ] P2 `/overview` + Overview page; app shell with nav (Overview,
+- [x] P2 `/overview` + Overview page; app shell with nav (Overview,
       Production, Forecast, Health, Finance), gateway badge in the header,
       a live-data context (Realtime) that pages refresh from
-- [ ] P3 `/forecast` (+ previous-runs accuracy) + Forecast page
-- [ ] P4 `/production` + Production page
-- [ ] P5 `/health` (availability, alert episodes, losses) + Health page
+- [x] P3 `/forecast` (+ previous-runs accuracy) + Forecast page
+- [x] P4 `/production` + Production page
+- [x] P5 `/health` (availability, alert episodes, losses) + Health page
       (verdict, table, detection report moved here)
-- [ ] P6 `006_finance.sql`, `/finance` (typical year, payback) + Finance page
+- [x] P6 `006_finance.sql`, `/finance` (typical year, payback) + Finance page
       with the system-cost field
-- [ ] P7 Remove the Kaggle demo: `(dashboard)/` pages, timeline context and
+- [x] P7 Remove the Kaggle demo: `(dashboard)/` pages, timeline context and
       components, `data.py`, `overview.py`, `fault_model.py`,
       `forecast_model.py`, `solar_features.py`, their routes
-- [ ] P8 Docs: README, `DEMO.md` (tour the five pages; fault injection is one
+- [x] P8 Docs: README, `DEMO.md` (tour the five pages; fault injection is one
       stop), `FINDINGS.md` entries for the forecast accuracy measured
+
+**Progress** (2026-10-12, Harsh): all five pages built and checked in the
+browser on the test plant with a live gateway. Today's energy agrees across
+Overview / Production / Forecast (4.5 kWh at the time of checking); the
+7-day forecast and a 5.7% day-ahead accuracy show real values; the loss
+breakdown sums to delivered energy. **Not yet verified:** monthly totals and
+saving the system cost / payback. Both need `006_finance.sql` run in
+Supabase; until then those panels say so instead of failing.
+Contract tweak: `overview.today_curve` is `{actual: [{t, kw}], forecast:
+[{t, kw}]}` (two series on their own time points) rather than one merged
+list; `/status` gains `timezone`.
 
 **Done when**: on the test plant, every page loads from stored data in a
 few seconds, numbers agree across pages (today's energy on Overview =

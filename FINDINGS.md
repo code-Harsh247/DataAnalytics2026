@@ -179,6 +179,35 @@ single run moves by ±0.1 F1.)
   seeded data with the older browser pipeline, whose faults were bigger
   (15–50%) and so easier to catch. Section 1 stays the benchmark.
 
+**Product MVP: forecasting and metrics** (Harsh, 2026-10-12)
+- **Forecast = weather forecast → physics → × calibration.** Calibration is
+  the plant's actual ÷ physics-expected energy over the last 14 days of
+  daylight readings (0.95 on the test plant). One number absorbs soiling,
+  shading, wiring and the site's sky bias. No per-plant ML model is trained
+  for the forecast: with weeks of data, a calibrated physics model is
+  harder to overfit than a learned one, and it stays interpretable.
+- **Accuracy is measured day-ahead, not in hindsight.** Open-Meteo's
+  previous-runs API returns each hour's forecast as issued the day before;
+  we run it through the same model and compare with what the plant made.
+  Test plant (18.5°N 73.9°E, 5–11 Oct, clear post-monsoon weather): mean
+  absolute error **5.7%**, per-day errors −5.9% to +14.9%. The forecast's
+  p10–p90 band (91–104% of the forecast) comes from those errors.
+  *Caveats:* 7 days of easy weather; and the calibration window overlaps
+  the scored days (one scalar, so the leak is small but not zero).
+- **Performance ratio** follows IEC 61724: AC energy ÷ (plane-of-array
+  insolation × kWp). The test plant's 30-day PR is 0.86, at the top of the
+  healthy 0.75–0.85 range. That's expected: the simulator has no long-term
+  soiling and only light shading, so treat it as a sanity check of the
+  formula, not a finding about real plants.
+- **Typical year** = the last 365 days of archive weather at the site →
+  physics × calibration: 13.8 MWh for 7.5 kWp (≈1,840 kWh/kWp). Real plants
+  in central India report ~1,400–1,700, so ours is optimistic, again because
+  the simulator has no soiling, curtailment or downtime.
+- **Loss breakdown adds up by construction**: potential − heat − ageing −
+  conversion − downtime − detected faults − other = delivered, where "other"
+  is the remainder. On the test plant (30 days): 1,285 → 1,102 kWh, with
+  heat the largest loss (81 kWh) and detected faults 28 kWh.
+
 ## 3. Bugs found along the way
 
 - **`weather.py` requested the wrong sunlight value.** It asked Open-Meteo for

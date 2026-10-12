@@ -1,11 +1,8 @@
-import pandas as pd
 import requests
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import fault_model, forecast_model, overview, weather
-from . import analysis, plant_analysis, plant_status, synthetic_generation
-from .data import load_plant
+from . import analysis, plant_analysis, plant_pages, plant_status
 from .plant_data import AuthError, InsufficientData, NotFound, UserSupabase
 
 app = FastAPI(title="Solar Plant Manager API")
@@ -17,79 +14,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-PLANTS = {
-    1: {"id": 1, "name": "Plant 1", "description": "Healthy baseline plant"},
-    2: {"id": 2, "name": "Plant 2", "description": "Plant with active maintenance flags"},
-}
-
-
-def _require_plant(plant_id: int) -> None:
-    if plant_id not in PLANTS:
-        raise HTTPException(404, f"Unknown plant {plant_id}")
-
-
-def _parse_as_of(as_of: str) -> pd.Timestamp:
-    try:
-        return pd.Timestamp(as_of)
-    except ValueError:
-        raise HTTPException(400, f"Invalid as_of date: {as_of!r}")
-
 
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
-
-
-@app.get("/api/plants")
-def list_plants():
-    return list(PLANTS.values())
-
-
-@app.get("/api/plants/{plant_id}/timeline")
-def timeline(plant_id: int):
-    _require_plant(plant_id)
-    df = load_plant(plant_id)
-    return {
-        "start": df["DATE_TIME"].dt.date.min().isoformat(),
-        "end": df["DATE_TIME"].dt.date.max().isoformat(),
-    }
-
-
-@app.get("/api/plants/{plant_id}/overview")
-def get_overview(plant_id: int, as_of: str):
-    _require_plant(plant_id)
-    return overview.get_overview(plant_id, _parse_as_of(as_of))
-
-
-@app.get("/api/plants/{plant_id}/inverters")
-def get_inverters(plant_id: int, as_of: str):
-    _require_plant(plant_id)
-    return fault_model.inverter_summary(plant_id, _parse_as_of(as_of))
-
-
-@app.get("/api/plants/{plant_id}/inverters/{source_key}")
-def get_inverter_detail(plant_id: int, source_key: str, as_of: str):
-    _require_plant(plant_id)
-    return fault_model.inverter_detail(plant_id, source_key, _parse_as_of(as_of))
-
-
-@app.get("/api/plants/{plant_id}/forecast")
-def get_forecast(plant_id: int, as_of: str):
-    _require_plant(plant_id)
-    return forecast_model.forecast_series(plant_id, _parse_as_of(as_of))
-
-
-@app.get("/api/weather/current")
-def get_current_weather(lat: float, lon: float):
-    try:
-        return weather.get_current_conditions(lat, lon)
-    except requests.RequestException as e:
-        raise HTTPException(502, f"Weather provider error: {e}")
-
-
-@app.post("/api/synthetic/generate")
-def generate_synthetic_readings(req: synthetic_generation.GenerateRequest):
-    return synthetic_generation.generate(req)
 
 
 @app.post("/api/plants/analyze")
@@ -134,3 +62,31 @@ def analyze_stored_plant(
 @app.get("/api/plants/{plant_id}/status")
 def get_plant_status(plant_id: str, authorization: str | None = Header(default=None)):
     return _call_as_user(authorization, lambda db: plant_status.plant_status(db, plant_id))
+
+
+# ---- The plant pages (Contract 7).
+
+@app.get("/api/plants/{plant_id}/overview")
+def get_plant_overview(plant_id: str, authorization: str | None = Header(default=None)):
+    return _call_as_user(authorization, lambda db: plant_pages.overview(db, plant_id))
+
+
+@app.get("/api/plants/{plant_id}/production")
+def get_plant_production(plant_id: str, days: int = 30, authorization: str | None = Header(default=None)):
+    days = max(7, min(days, 31))
+    return _call_as_user(authorization, lambda db: plant_pages.production(db, plant_id, days))
+
+
+@app.get("/api/plants/{plant_id}/forecast")
+def get_plant_forecast(plant_id: str, authorization: str | None = Header(default=None)):
+    return _call_as_user(authorization, lambda db: plant_pages.forecast_page(db, plant_id))
+
+
+@app.get("/api/plants/{plant_id}/health")
+def get_plant_health(plant_id: str, authorization: str | None = Header(default=None)):
+    return _call_as_user(authorization, lambda db: plant_pages.health(db, plant_id))
+
+
+@app.get("/api/plants/{plant_id}/finance")
+def get_plant_finance(plant_id: str, authorization: str | None = Header(default=None)):
+    return _call_as_user(authorization, lambda db: plant_pages.finance(db, plant_id))

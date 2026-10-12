@@ -17,6 +17,7 @@ export interface InverterVerdict {
 
 export interface PlantStatus {
   as_of: string;
+  timezone?: string;
   model: string;
   gateway: { connected: boolean; serial: string | null; last_seen_at: string | null } | null;
   inverters: InverterVerdict[];

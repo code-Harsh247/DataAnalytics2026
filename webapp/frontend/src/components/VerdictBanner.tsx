@@ -1,5 +1,6 @@
 import type { PlantStatus } from "@/lib/status";
 import { formatUtcTime } from "@/lib/time";
+import { localTime } from "@/lib/format";
 
 // The one-line answer to "is my plant OK right now?", from the live detector
 // (GET /api/plants/{id}/status).
@@ -45,7 +46,7 @@ export function VerdictBanner({ status, error }: { status: PlantStatus | null; e
           <div key={inv.label} className="text-sm text-red-800">
             <span className="font-semibold">{inv.label} is under-producing</span>
             {inv.shortfall_pct != null && <> by ~{Math.round(inv.shortfall_pct)}%</>}
-            {inv.since && <> since {formatUtcTime(inv.since)}</>}
+            {inv.since && <> since {status.timezone ? localTime(inv.since, status.timezone) : formatUtcTime(inv.since)}</>}
             {inv.est_revenue_lost_24h != null && inv.est_revenue_lost_24h > 0 && (
               <span className="text-red-700">
                 {" "}· ≈{inv.est_revenue_lost_24h.toFixed(2)} lost in the last 24 h ({inv.est_kwh_lost_24h?.toFixed(2)} kWh)

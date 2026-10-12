@@ -15,9 +15,8 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // The user's own plant is the main page; /setup-plant shows the onboarding
-    // form until a plant exists, then that plant's dashboard.
-    if (session) router.replace("/setup-plant");
+    // Home is the plant's Overview; AuthGate sends users without a plant to setup.
+    if (session) router.replace("/");
   }, [session, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
