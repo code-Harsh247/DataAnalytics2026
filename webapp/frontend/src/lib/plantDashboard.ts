@@ -42,12 +42,15 @@ export async function getWeatherHistory(plantId: string): Promise<WeatherPoint[]
   );
 }
 
+// fault_active / fault_severity are deliberately never read here: they're
+// the simulator's ground truth, for scoring the detector only. Inverter
+// status comes from the detector (lib/status.ts).
 export interface GenerationPoint {
   recorded_at: string;
   inverter_id: string;
   ac_power_kw: number;
   dc_power_kw: number;
-  fault_active: boolean;
+  energy_kwh: number | null;
   revenue_per_interval: number | null;
 }
 
@@ -66,7 +69,7 @@ export async function getGenerationHistory(plantId: string): Promise<GenerationP
   return fetchAllPages<GenerationPoint>((from, to) =>
     supabase
       .from("generation_readings")
-      .select("recorded_at, inverter_id, ac_power_kw, dc_power_kw, fault_active, revenue_per_interval")
+      .select("recorded_at, inverter_id, ac_power_kw, dc_power_kw, energy_kwh, revenue_per_interval")
       .in("inverter_id", inverterIds)
       .gte("recorded_at", since)
       .order("recorded_at", { ascending: true })
@@ -75,40 +78,35 @@ export async function getGenerationHistory(plantId: string): Promise<GenerationP
   );
 }
 
-export interface InverterStatus {
+export interface InverterLatest {
   id: string;
   label: string;
   latest_ac_power_kw: number | null;
-  latest_fault_active: boolean;
   latest_recorded_at: string | null;
 }
 
-export async function getInverterStatuses(plantId: string): Promise<InverterStatus[]> {
+export async function getInverterLatest(plantId: string): Promise<InverterLatest[]> {
   const { data: inverters, error: invError } = await supabase
     .from("inverters")
     .select("id, label")
-    .eq("plant_id", plantId)
-    .order("label", { ascending: true });
+    .eq("plant_id", plantId);
   if (invError) throw invError;
   if (!inverters || inverters.length === 0) return [];
+  // Numeric order: INV-10 after INV-9, not after INV-1.
+  inverters.sort((a, b) => Number(a.label.split("-").pop()) - Number(b.label.split("-").pop()));
 
   const inverterIds = inverters.map((i) => i.id as string);
   const { data: readings, error: readError } = await supabase
     .from("generation_readings")
-    .select("inverter_id, ac_power_kw, fault_active, recorded_at")
+    .select("inverter_id, ac_power_kw, recorded_at")
     .in("inverter_id", inverterIds)
     .order("recorded_at", { ascending: false })
     .limit(inverterIds.length * 5); // small buffer, find latest per inverter client-side
   if (readError) throw readError;
 
-  const latestByInverter = new Map<
-    string,
-    { ac_power_kw: number; fault_active: boolean; recorded_at: string }
-  >();
+  const latestByInverter = new Map<string, { ac_power_kw: number; recorded_at: string }>();
   for (const r of readings ?? []) {
-    if (!latestByInverter.has(r.inverter_id)) {
-      latestByInverter.set(r.inverter_id, r);
-    }
+    if (!latestByInverter.has(r.inverter_id)) latestByInverter.set(r.inverter_id, r);
   }
 
   return inverters.map((inv) => {
@@ -117,7 +115,6 @@ export async function getInverterStatuses(plantId: string): Promise<InverterStat
       id: inv.id,
       label: inv.label,
       latest_ac_power_kw: latest?.ac_power_kw ?? null,
-      latest_fault_active: latest?.fault_active ?? false,
       latest_recorded_at: latest?.recorded_at ?? null,
     };
   });
@@ -129,22 +126,16 @@ export interface PlantTotals {
   reading_count: number;
 }
 
-const INTERVAL_HOURS = 0.25;
-
+// Summed in SQL (plant_totals, 005_devices.sql) rather than paging every
+// reading into the browser.
 export async function getPlantTotals(plantId: string): Promise<PlantTotals> {
-  const inverterIds = await getPlantInverterIds(plantId);
-  if (inverterIds.length === 0) return { total_energy_kwh: 0, total_revenue: 0, reading_count: 0 };
+  const { data, error } = await supabase.rpc("plant_totals", { p_plant_id: plantId });
+  if (error) throw error;
+  return data as PlantTotals;
+}
 
-  const rows = await fetchAllPages<{ ac_power_kw: number | null; revenue_per_interval: number | null }>(
-    (from, to) =>
-      supabase
-        .from("generation_readings")
-        .select("ac_power_kw, revenue_per_interval")
-        .in("inverter_id", inverterIds)
-        .order("id", { ascending: true })
-        .range(from, to),
-  );
-  const total_energy_kwh = rows.reduce((sum, r) => sum + (r.ac_power_kw ?? 0) * INTERVAL_HOURS, 0);
-  const total_revenue = rows.reduce((sum, r) => sum + (r.revenue_per_interval ?? 0), 0);
-  return { total_energy_kwh, total_revenue, reading_count: rows.length };
+// Energy one reading stands for. Rows from before energy_kwh existed were
+// 15-minute readings.
+export function readingEnergyKwh(r: { energy_kwh: number | null; ac_power_kw: number | null }): number {
+  return r.energy_kwh ?? (r.ac_power_kw ?? 0) * 0.25;
 }

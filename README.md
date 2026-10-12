@@ -1,68 +1,60 @@
 # Solar Plant Manager
 
-A solar plant monitoring product, built in two layers: a rigorous data
-analytics/ML demo on real historical plant data, and a real (if early-stage)
-product on top — accounts, plant onboarding, live weather ingestion,
-physically-grounded synthetic generation data, and ML fault detection
-validated against ground-truth fault labels.
+An MVP of a complete solar plant management tool: live monitoring,
+production analytics, generation forecasts, plant health with ML fault
+detection, and financials, for a small plant owner.
 
 *Data Analytics 2026 — Harsh Chattar (22CS30028), Abhinav Kumar Singh (22CS30005)*
 
 ## What it is
 
-This started as a data analytics course project (predict and diagnose solar
-plant performance from a real Kaggle dataset — two Indian solar plants, 34
-days, 22 inverters each) and grew into a product: **Solar Plant Manager**, a
-dashboard an owner could plausibly use to monitor their plant's health,
-spot failing inverters, and see what each fault is costing them.
+This started as a data analytics course project on a Kaggle dataset (two
+Indian solar plants, 34 days) and grew into a product. An owner signs up,
+describes their plant, connects its gateway, and gets the answers they need
+day to day: how much did I make, how well is the plant doing, what will it
+make this week, is anything wrong, and when does it pay for itself.
 
-Two things run side by side in this repo:
-
-- **The historical demo** (`webapp/backend` serving `Plant 1`/`Plant 2`) —
-  showcases the original analysis: a cross-validated Random Forest "expected
-  power" model, residual-based anomaly detection, trend-based risk scoring,
-  and day-ahead forecasting benchmarked against persistence/climatology
-  baselines. Reachable via the dashboard nav once logged in.
-- **The real product flow** — sign up, configure your own plant (location,
-  capacity, panel specs), watch real data start accumulating, and run a
-  30-day fault analysis that compares four detection models on your plant.
-  There's no real inverter hardware, so generation is a deliberate,
-  honestly-labeled synthetic stand-in driven by real weather — see below.
+**Be clear about one thing:** there's no real inverter hardware. The
+gateway is a *simulated* device that behaves like a real data logger and
+generates telemetry from **real weather** at the plant's location with
+`pvlib` physics. That's labelled in the app, and it's also what lets us
+measure how accurate the fault detection is, because the simulator records
+the faults it injects.
 
 ## What it does
 
-1. **Sign up / log in** — real accounts via Supabase Auth
-2. **Configure a plant** — name, location, tariff, and optional specs
-   (capacity, panel count/type, tilt/azimuth, commissioning date, area).
-   Every field is actually used, not decorative — location and tilt/azimuth
-   drive real solar-position physics, panel type sets a real temperature
-   coefficient, commissioning date drives degradation, area is a capacity
-   fallback, tariff computes real revenue
-3. **Live ingestion** (every 15 min while the app is open): fetches real
-   current weather for the plant's coordinates (Open-Meteo), then generates
-   synthetic per-inverter power output from that weather via `pvlib`
-   plane-of-array irradiance + a standard temperature-derating model —
-   multiple virtual inverters with persistent efficiency variance and
-   occasional realistic multi-hour fault episodes
-4. **A live dashboard** for that real, accumulating data — energy/revenue to
-   date, active faults, weather and generation history charts, per-inverter
-   status
-5. **30-day fault analysis** (needs ≥ 2 inverters): the backend pulls 30 days
-   of real historical weather for the plant, generates a month of synthetic
-   output with injected, labeled faults, trains every detection model, and
-   returns:
-   - expected vs. actual output, with flagged hours (and the true faults as
-     an optional overlay)
-   - per-inverter status with kWh and revenue lost
-   - a model comparison — precision, recall, F1 against the true labels, and
-     R² of the expected-power fit — where you can switch which model's
-     results you're looking at
-6. **The historical demo dashboard** — Command Center, Maintenance Queue
-   (with plain-language fault diagnosis), and Forecast pages, all driven by
-   the original ML analysis on the Kaggle dataset, with a timeline scrubber
-   to replay the 34-day history
+**Getting started**
+- **Accounts** (Supabase Auth) and **plant setup**: location, tariff,
+  capacity, panels, tilt/azimuth, install date. Every field feeds the physics.
+- **Connect the gateway** with a 15-minute pairing code. The simulated
+  gateway (`python -m gateway`) holds its own device token, catches up on
+  readings it missed while off, and streams live ones. Its console can
+  `inject` a fault or take its link `offline` for demos.
 
-## Model results
+**Five pages**
+1. **Overview**: power now vs what the plant should be producing; energy,
+   earnings and CO₂ avoided today / this month / lifetime; performance
+   ratio; specific yield; a health summary; today's output curve against
+   the forecast. Updates live (Supabase Realtime).
+2. **Production**: daily energy with performance ratio, monthly totals,
+   inverter comparison (energy, share, PR), best/worst day, 7-day output
+   and sunlight charts.
+3. **Forecast**: the next 7 days (kWh, earnings, likely range, cloud cover),
+   today hour by hour against actual output, the projected month total, and
+   **how accurate the forecast has been**: each recent day's forecast *as
+   issued the day before* against what the plant actually made.
+4. **Health**: a live verdict per inverter from the ML detector ("INV-3 is
+   under-producing by ~27% since 08:50, ≈1.87 lost in the last 24 h"),
+   availability, alert history with what each episode cost, a loss
+   breakdown from sunlight potential down to delivered energy, and the
+   30-day detection report comparing four models.
+5. **Finance**: earnings to date and per day, projected annual production
+   and earnings (a typical year of real weather at the site), and payback
+   once the owner enters the system cost.
+
+## Fault detection: model results
+
+One feature of the Health page, and the most measured part of the project.
 
 Four detectors, compared on the same data with the same metrics. The
 canonical dataset is 30 days of real weather at 18°N 80°E, a 7.5 kW plant
@@ -91,28 +83,52 @@ The reasoning behind every modelling decision, the dead ends, and some
 exploratory models are in [`FINDINGS.md`](FINDINGS.md). One example: a
 no-ML peer comparison reaches 0.78.
 
+## Forecasting
+
+Forecast = Open-Meteo's weather forecast for the site → the same physics
+model → × the plant's **calibration** (actual ÷ physics over the last 14
+days; it absorbs dirt, shading and wiring losses). Accuracy is measured
+against the forecast *as issued the day before* (Open-Meteo's previous-runs
+API), not against hindsight.
+
+Over **12 months** at the test plant (Pune), the day-ahead forecast's error
+was **1.54 kWh/day (4.6%)**: **42% lower than "tomorrow = today"**
+(persistence) and 59% lower than a 30-day average. The monsoon roughly
+triples the error, but the lead holds in every month.
+
+## Analytics report
+
+Uncertainty and significance of the model comparison, detection by fault
+episode and time to detect, the detection limit as a curve, how results
+depend on the simulator's noise, the data's exploratory analysis, and the
+forecast's skill: **[`webapp/backend/analysis/REPORT.md`](webapp/backend/analysis/REPORT.md)**
+(12 figures, regenerated by `python -m analysis.run_all`). The short version
+is in `FINDINGS.md` §6. For example, RF and Gradient Boosting are
+statistically tied, and a plant-wide sunlight error is what makes the ML
+beat the physics baseline.
+
 ## Current state
 
-Phases 0–15 plus the hackathon MVP's ML pipeline and analysis panel are
-built and verified end to end. See [`PRODUCT_PLAN.md`](PRODUCT_PLAN.md) for
-the phase-by-phase log; this README is the summary.
+Built and verified end to end on a test plant: accounts and setup, gateway
+pairing, live monitoring, the five pages, fault detection and the forecast.
+See [`PRODUCT_PLAN.md`](PRODUCT_PLAN.md) for the phase-by-phase log.
 
 **Solid:**
-- Backend API serving the historical demo's ML pipeline (FastAPI)
-- Real Supabase auth, gating the dashboard behind a configured plant
-- Plant setup with a full, genuinely-used field set
-- Real weather ingestion + physically-grounded synthetic generation,
-  including stateful fault injection
-- A live dashboard for a user's real accumulating data
-- Historical backfill, an evaluation harness, four anomaly-detection models,
-  and `POST /api/plants/analyze`, wired into the dashboard's analysis panel
+- Real Supabase auth and row-level security everywhere; the backend reads
+  Supabase as the signed-in user (their JWT), and the gateway uses its own
+  hashed device token. No admin key anywhere.
+- A simulated gateway with catch-up, store-and-forward and a fault console
+- One cached data frame per plant behind every page, so numbers agree
+  across pages (today's energy is the same on Overview, Production and Forecast)
+- Real day-ahead forecast accuracy; a typical-year projection from real
+  archive weather
 
 **Not done yet:**
-- Deployment (currently local only)
-- Real scheduled ingestion: data is currently collected by client-side
-  polling while a browser tab is open, not by a background job
-- The backend has no auth of its own. `/analyze` is stateless and takes the
-  plant's specs in the request; it never reads or writes user data
+- Real hardware: the only gateway is the simulated one (a CSV import of a
+  real inverter's export would be the first step)
+- Email/push alerts (warnings are in-app only)
+- Cleaning advice (needs dirt build-up and rain in the simulator)
+- Multiple plants per account; deployment (currently local only)
 
 ## Architecture
 
@@ -120,23 +136,27 @@ the phase-by-phase log; this README is the summary.
 webapp/
   backend/           FastAPI (Python)
     app/
-      data.py, solar_features.py       historical Plant 1/2 pipeline
-      fault_model.py, forecast_model.py  historical demo ML: expected power, anomalies, forecasting
-      weather.py                       real current weather (Open-Meteo) + clear-sky physics
-      synthetic_generation.py          weather + plant specs -> synthetic panel output (pvlib)
-      backfill.py                      30 days of archive weather -> labeled synthetic dataset
+      synthetic_generation.py          shared physics constants (pvlib model)
+      backfill.py                      archive weather -> labelled synthetic dataset (the benchmark)
       models/                          anomaly models (auto-discovered) + evaluate.py harness
-      analysis.py                      POST /api/plants/analyze: backfill, train all models, compare
-      seed_supabase.py                 fill your own plant with 30 days of history
+      analysis.py                      POST /api/plants/analyze: benchmark-style analysis on a fresh dataset
+      plant_data.py                    a user's stored readings (read as that user) -> model dataset
+      plant_metrics.py                 the cached per-plant frame: energy, expected, PR, calibration, time zone
+      plant_forecast.py                7-day forecast, day-ahead accuracy, typical-year projection
+      plant_pages.py                   GET /api/plants/{id}/overview|production|forecast|health|finance
+      plant_analysis.py                POST /api/plants/{id}/analyze: the 30-day detection report
+      plant_status.py                  GET  /api/plants/{id}/status: the live per-inverter verdict
+      seed_supabase.py                 fill a plant with 30 days of history
+    gateway/                           the simulated gateway: python -m gateway pair|run
     data/backfill/sample_plant.csv     canonical evaluation dataset
   frontend/          Next.js (App Router) + Tailwind + Recharts
     src/app/
-      (dashboard)/    historical demo — Overview, Maintenance, Forecast (auth + plant required)
+      (plant)/        Overview (/), Production, Forecast, Health, Finance
       login/          sign in / sign up
-      setup-plant/    plant onboarding form -> live real-plant dashboard once configured
-    src/components/   incl. PlantDashboardView + AnalysisPanel (the 30-day analysis)
-    src/context/      Auth, Plant, and Simulation (demo timeline) state
-    src/lib/          Supabase client + typed API/data-access functions
+      setup-plant/    first-time plant setup
+    src/context/      Auth, Plant, and Live (gateway, verdict, Realtime) state
+    src/components/   page shell, charts, pairing card, verdict banner, detection report
+    src/lib/          Supabase client + typed clients for every endpoint
   supabase/           SQL migrations (run manually in the Supabase SQL Editor —
                       the app only holds the client-safe anon key, not admin access)
 ```
@@ -182,7 +202,18 @@ cd webapp/frontend
 npm install && npm run dev
 ```
 
-Open <http://localhost:3000>. For a guided walkthrough, see [`DEMO.md`](DEMO.md).
+Open <http://localhost:3000>, sign up, set up a plant, and click **Get
+pairing code**. Then start the simulated gateway in a third terminal:
+
+```bash
+cd webapp/backend
+.venv/bin/python -m gateway pair <CODE>     # Windows: .venv/Scripts/python
+.venv/bin/python -m gateway run             # a reading every 5 min; --interval 30 for a demo
+```
+
+While it runs, type `inject INV-3 30` to break an inverter, `clear` to fix
+it, `offline 3m` to drop its link, or `help`. For a guided walkthrough, see
+[`DEMO.md`](DEMO.md).
 
 **Useful extras** (from `webapp/backend`; on Windows swap `.venv/bin` for
 `.venv/Scripts`):
@@ -193,17 +224,20 @@ Open <http://localhost:3000>. For a guided walkthrough, see [`DEMO.md`](DEMO.md)
 
 # Give your own plant 30 days of history, so the live charts aren't empty
 SEED_EMAIL=<your login email> .venv/bin/python -m app.seed_supabase
-```
 
-The historical demo dashboard needs the Kaggle ["Solar Power Generation Data"](https://www.kaggle.com/datasets/anikannal/solar-power-generation-data)
-CSVs in `webapp/backend/data/raw/` (not included in the repo). The real
-product flow doesn't need them.
+# Rerun the analytics report (~8 min; needs matplotlib)
+.venv/bin/pip install -r analysis/requirements.txt
+.venv/bin/python -m analysis.run_all
+```
 
 ## Next phase
 
-- **Deploy**: backend on Render, frontend on Vercel
+- **Real data in**: import a CSV export from a real inverter portal, then a
+  real gateway
 - **Peer-comparison model**: promote the exploratory peer hybrid from
-  `FINDINGS.md` §5 to a fifth model (it beats Random Forest, 0.78 vs 0.71)
-- **Scheduled ingestion**: a background job instead of browser polling
-- **Live alerting**: a trailing rather than centered smoothing window, so
-  faults can be flagged as they happen instead of only in retrospect
+  `FINDINGS.md` §5 to a fifth model and the default (it beats Random Forest,
+  0.78 vs 0.71)
+- **Alerts**: email/push when the verdict changes
+- **Cleaning advice**: model dirt build-up and rain, then predict when
+  cleaning pays for itself
+- **Deploy**: backend on Render, frontend on Vercel

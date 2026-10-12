@@ -95,8 +95,8 @@ export function AnalysisPanel({ plant }: { plant: Plant }) {
         <div>
           <div className="text-sm font-medium text-gray-700">30-day fault analysis</div>
           <p className="text-xs text-gray-500 mt-1 max-w-xl">
-            Rebuilds the last 30 days from real weather at this location, trains every anomaly
-            model on the first three weeks, and scores them on the rest.
+            Looks back over the last 30 days of readings from your inverters: trains every anomaly
+            model on the first three weeks and checks the most recent week.
           </p>
         </div>
         <button
@@ -118,7 +118,7 @@ export function AnalysisPanel({ plant }: { plant: Plant }) {
 
       {loading && !result && (
         <p className="text-sm text-gray-500">
-          Fetching weather and training models. This usually takes a few seconds.
+          Reading your plant&apos;s history and training models. This usually takes 10–20 seconds.
         </p>
       )}
 
@@ -150,7 +150,7 @@ export function AnalysisPanel({ plant }: { plant: Plant }) {
                   checked={showTrueFaults}
                   onChange={(e) => setShowTrueFaults(e.target.checked)}
                 />
-                Show true faults
+                Show injected faults
               </label>
             </div>
             {!hasExpected && (
@@ -201,7 +201,7 @@ export function AnalysisPanel({ plant }: { plant: Plant }) {
                 {showTrueFaults && (
                   <Line
                     dataKey="true_fault_kw"
-                    name="True fault"
+                    name="Injected fault"
                     stroke="none"
                     dot={{ r: 6, fill: "none", stroke: "#f59e0b", strokeWidth: 1.5 }}
                     activeDot={false}
@@ -219,7 +219,7 @@ export function AnalysisPanel({ plant }: { plant: Plant }) {
                   <th className="px-4 py-2 font-medium">Inverter</th>
                   <th className="px-4 py-2 font-medium">Status</th>
                   <th className="px-4 py-2 font-medium">Flagged hours</th>
-                  <th className="px-4 py-2 font-medium">True fault hours</th>
+                  <th className="px-4 py-2 font-medium">Injected fault hours</th>
                   <th className="px-4 py-2 font-medium">Est. energy lost</th>
                   <th className="px-4 py-2 font-medium">Est. revenue lost</th>
                 </tr>
@@ -246,7 +246,8 @@ export function AnalysisPanel({ plant }: { plant: Plant }) {
           <div>
             <div className="text-sm font-medium text-gray-700 mb-1">Model comparison</div>
             <p className="text-xs text-gray-500 mb-2">
-              Scored against the known injected faults. Pick a model to see its results above.
+              How accurate is this? Scored against the faults the simulated gateway injected, which a
+              real plant wouldn&apos;t know. Pick a model to see its results above.
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[560px]">
@@ -302,9 +303,9 @@ export function AnalysisPanel({ plant }: { plant: Plant }) {
           </div>
 
           <p className="text-xs text-gray-400">
-            Weather is real; panel output is simulated from it with injected faults, which is what
-            makes these accuracy numbers measurable. Simulated output over the 30 days:{" "}
-            {result.totals.energy_kwh.toFixed(0)} kWh.
+            Weather is real; inverter output comes from the simulated gateway, which injects faults
+            and records where it did. That record is what makes these accuracy numbers measurable.
+            Output over the period: {result.totals.energy_kwh.toFixed(0)} kWh.
           </p>
         </div>
       )}

@@ -1,0 +1,81 @@
+{
+  "location": {
+    "lat": 18.52,
+    "lon": 73.86,
+    "capacity_kw": 7.5
+  },
+  "days": 334,
+  "from": "2025-11-06",
+  "to": "2026-10-05",
+  "all": {
+    "forecast": {
+      "mae_kwh": 1.54,
+      "rmse_kwh": 2.63,
+      "bias_kwh": 0.1,
+      "mape_pct": 4.6,
+      "skill_vs_persistence": 0.419,
+      "skill_vs_climatology": 0.586
+    },
+    "persistence": {
+      "mae_kwh": 2.65,
+      "rmse_kwh": 4.42,
+      "bias_kwh": -0.01,
+      "mape_pct": 7.8
+    },
+    "climatology": {
+      "mae_kwh": 3.72,
+      "rmse_kwh": 5.3,
+      "bias_kwh": -0.24,
+      "mape_pct": 11.9
+    }
+  },
+  "monsoon": {
+    "forecast": {
+      "mae_kwh": 2.77,
+      "rmse_kwh": 3.85,
+      "bias_kwh": -0.2,
+      "mape_pct": 8.9,
+      "skill_vs_persistence": 0.34,
+      "skill_vs_climatology": 0.485
+    },
+    "persistence": {
+      "mae_kwh": 4.2,
+      "rmse_kwh": 6.37,
+      "bias_kwh": 0.06,
+      "mape_pct": 13.8
+    },
+    "climatology": {
+      "mae_kwh": 5.38,
+      "rmse_kwh": 7.43,
+      "bias_kwh": 0.25,
+      "mape_pct": 20.7
+    }
+  },
+  "dry": {
+    "forecast": {
+      "mae_kwh": 0.83,
+      "rmse_kwh": 1.54,
+      "bias_kwh": 0.28,
+      "mape_pct": 2.2,
+      "skill_vs_persistence": 0.528,
+      "skill_vs_climatology": 0.699
+    },
+    "persistence": {
+      "mae_kwh": 1.76,
+      "rmse_kwh": 2.74,
+      "bias_kwh": -0.05,
+      "mape_pct": 4.4
+    },
+    "climatology": {
+      "mae_kwh": 2.76,
+      "rmse_kwh": 3.54,
+      "bias_kwh": -0.52,
+      "mape_pct": 6.8
+    }
+  },
+  "monsoon_days": 122,
+  "figures": {
+    "forecast_mae_by_month": "figures/forecast_mae_by_month.png",
+    "forecast_scatter": "figures/forecast_scatter.png"
+  }
+}

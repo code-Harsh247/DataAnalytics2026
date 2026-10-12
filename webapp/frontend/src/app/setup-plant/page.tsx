@@ -5,8 +5,6 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { usePlant } from "@/context/PlantContext";
 import { createPlant, type NewPlant } from "@/lib/plants";
-import { PlantDashboardView } from "@/components/PlantDashboardView";
-import { NavBar } from "@/components/NavBar";
 
 const MODULE_TYPES = ["Monocrystalline", "Polycrystalline", "Thin-film", "Other"];
 
@@ -45,6 +43,11 @@ export default function SetupPlantPage() {
   useEffect(() => {
     if (!authLoading && !session) router.replace("/login");
   }, [authLoading, session, router]);
+
+  // Setup is only for a first plant; once there is one, its pages are the home.
+  useEffect(() => {
+    if (!plantLoading && plant) router.replace("/");
+  }, [plantLoading, plant, router]);
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -93,16 +96,7 @@ export default function SetupPlantPage() {
     return <div className="p-6 text-gray-500">Loading…</div>;
   }
 
-  if (plant) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <NavBar />
-        <PlantDashboardView plant={plant} />
-      </div>
-    );
-  }
-
-  if (justCreated) {
+  if (plant || justCreated) {
     // Brief transitional state -- refetch() is awaited before justCreated is
     // set, so `plant` should already be populated by the time we get here;
     // this only covers the instant before that render lands.
