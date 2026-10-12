@@ -13,3 +13,7 @@ webapp/backend/gateway/commands.txt
 
 # Raw Kaggle data — not redistributed, download separately
 webapp/backend/data/raw/*.csv
+
+# Analysis caches (weather downloads, regenerated datasets, pooled predictions);
+# the results (out/*.json), figures and REPORT.md are committed
+webapp/backend/analysis/out/*.csv

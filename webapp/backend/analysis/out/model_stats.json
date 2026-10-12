@@ -1,0 +1,252 @@
+{
+  "bootstrap": {
+    "n_blocks": 72,
+    "models": {
+      "random_forest": {
+        "f1": 0.699,
+        "ci95": [
+          0.624,
+          0.767
+        ]
+      },
+      "gradient_boosting": {
+        "f1": 0.672,
+        "ci95": [
+          0.586,
+          0.745
+        ]
+      },
+      "baseline_ratio": {
+        "f1": 0.635,
+        "ci95": [
+          0.565,
+          0.696
+        ]
+      },
+      "isolation_forest": {
+        "f1": 0.627,
+        "ci95": [
+          0.533,
+          0.707
+        ]
+      }
+    },
+    "differences_vs_rf": {
+      "gradient_boosting": {
+        "diff": 0.028,
+        "ci95": [
+          -0.008,
+          0.07
+        ],
+        "share_of_resamples_rf_better": 0.928
+      },
+      "baseline_ratio": {
+        "diff": 0.065,
+        "ci95": [
+          0.007,
+          0.124
+        ],
+        "share_of_resamples_rf_better": 0.984
+      },
+      "isolation_forest": {
+        "diff": 0.072,
+        "ci95": [
+          0.005,
+          0.146
+        ],
+        "share_of_resamples_rf_better": 0.982
+      }
+    }
+  },
+  "paired": {
+    "per_seed_f1": {
+      "random_forest": [
+        0.761,
+        0.713,
+        0.66,
+        0.7,
+        0.536,
+        0.914,
+        0.72,
+        0.636
+      ],
+      "gradient_boosting": [
+        0.725,
+        0.734,
+        0.682,
+        0.657,
+        0.444,
+        0.872,
+        0.707,
+        0.595
+      ],
+      "baseline_ratio": [
+        0.591,
+        0.619,
+        0.706,
+        0.531,
+        0.505,
+        0.737,
+        0.778,
+        0.635
+      ],
+      "isolation_forest": [
+        0.571,
+        0.63,
+        0.667,
+        0.531,
+        0.436,
+        0.892,
+        0.542,
+        0.758
+      ]
+    },
+    "wilcoxon_vs_rf": {
+      "gradient_boosting": {
+        "mean_diff": 0.028,
+        "rf_wins": 6,
+        "p_value": 0.0781
+      },
+      "baseline_ratio": {
+        "mean_diff": 0.067,
+        "rf_wins": 6,
+        "p_value": 0.1484
+      },
+      "isolation_forest": {
+        "mean_diff": 0.077,
+        "rf_wins": 6,
+        "p_value": 0.1094
+      }
+    }
+  },
+  "episodes": {
+    "random_forest": {
+      "episodes": 96,
+      "caught": 65,
+      "episode_recall": 0.677,
+      "median_hours_to_detect": 0.0,
+      "detected_within_1h": 0.969,
+      "alarm_runs": 98,
+      "false_alarm_runs": 34,
+      "episode_precision": 0.653
+    },
+    "gradient_boosting": {
+      "episodes": 96,
+      "caught": 58,
+      "episode_recall": 0.604,
+      "median_hours_to_detect": 0.0,
+      "detected_within_1h": 0.948,
+      "alarm_runs": 79,
+      "false_alarm_runs": 22,
+      "episode_precision": 0.722
+    },
+    "baseline_ratio": {
+      "episodes": 96,
+      "caught": 81,
+      "episode_recall": 0.844,
+      "median_hours_to_detect": 0.0,
+      "detected_within_1h": 0.889,
+      "alarm_runs": 252,
+      "false_alarm_runs": 165,
+      "episode_precision": 0.345
+    },
+    "isolation_forest": {
+      "episodes": 96,
+      "caught": 53,
+      "episode_recall": 0.552,
+      "median_hours_to_detect": 0.0,
+      "detected_within_1h": 0.925,
+      "alarm_runs": 89,
+      "false_alarm_runs": 37,
+      "episode_precision": 0.584
+    }
+  },
+  "severity": {
+    "bins": [
+      "5\u201310%",
+      "10\u201315%",
+      "15\u201320%",
+      "20\u201330%",
+      "30\u201340%"
+    ],
+    "hourly_recall": {
+      "random_forest": [
+        0.1,
+        0.528,
+        0.775,
+        0.955,
+        0.97
+      ],
+      "gradient_boosting": [
+        0.033,
+        0.34,
+        0.592,
+        0.94,
+        0.97
+      ],
+      "baseline_ratio": [
+        0.267,
+        0.453,
+        0.662,
+        0.97,
+        1.0
+      ],
+      "isolation_forest": [
+        0.05,
+        0.189,
+        0.38,
+        0.806,
+        0.98
+      ]
+    },
+    "episode_recall": {
+      "random_forest": [
+        0.118,
+        0.533,
+        0.85,
+        0.824,
+        0.889
+      ],
+      "gradient_boosting": [
+        0.059,
+        0.4,
+        0.65,
+        0.824,
+        0.889
+      ],
+      "baseline_ratio": [
+        0.412,
+        0.867,
+        0.9,
+        0.941,
+        1.0
+      ],
+      "isolation_forest": [
+        0.059,
+        0.333,
+        0.5,
+        0.706,
+        0.926
+      ]
+    },
+    "hours_per_bin": [
+      60,
+      53,
+      71,
+      67,
+      100
+    ],
+    "episodes_per_bin": [
+      17,
+      15,
+      20,
+      17,
+      27
+    ]
+  },
+  "figures": {
+    "f1_ci": "figures/f1_ci.png",
+    "recall_by_severity": "figures/recall_by_severity.png",
+    "time_to_detect": "figures/time_to_detect.png"
+  }
+}

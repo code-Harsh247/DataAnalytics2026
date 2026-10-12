@@ -48,7 +48,11 @@ export default function ForecastPage() {
           value={data.accuracy.mape != null ? `±${data.accuracy.mape.toFixed(1)}%` : "—"}
           sub={
             data.accuracy.days.length
-              ? `average day-ahead error, last ${data.accuracy.days.length} days`
+              ? `average day-ahead error, last ${data.accuracy.days.length} days${
+                  data.accuracy.skill_vs_persistence != null
+                    ? ` · ${pct(data.accuracy.skill_vs_persistence)} better than "tomorrow = today"`
+                    : ""
+                }`
               : "needs a few complete days of readings"
           }
           tone={data.accuracy.mape != null && data.accuracy.mape > 20 ? "warn" : "neutral"}
@@ -86,7 +90,7 @@ export default function ForecastPage() {
 
       <Panel
         title="How good is the forecast?"
-        subtitle="Each day's forecast as it was issued the day before (not hindsight), against what the plant actually produced."
+        subtitle="Each day's forecast as it was issued the day before (not hindsight), against what the plant actually produced, and against the naive guess that a day will be like the one before. Over a full year at this location the forecast's error was 42% lower than that naive guess (see FINDINGS.md)."
       >
         {data.accuracy.days.length === 0 ? (
           <p className="text-sm text-gray-500">Not enough complete days of readings yet.</p>
@@ -98,6 +102,9 @@ export default function ForecastPage() {
                 <th className="py-1.5 font-medium">Forecast</th>
                 <th className="py-1.5 font-medium">Actual</th>
                 <th className="py-1.5 font-medium">Error</th>
+                <th className="py-1.5 font-medium" title="The naive forecast to beat: tomorrow = today">
+                  &ldquo;Same as yesterday&rdquo;
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -109,6 +116,11 @@ export default function ForecastPage() {
                   <td className={`py-2 ${Math.abs(d.error_pct) > 15 ? "text-amber-700" : "text-gray-600"}`}>
                     {d.error_pct > 0 ? "+" : ""}
                     {d.error_pct.toFixed(1)}%
+                  </td>
+                  <td className="py-2 text-gray-400">
+                    {d.persistence_kwh != null
+                      ? `${kwh(d.persistence_kwh)} (${d.persistence_kwh >= d.actual_kwh ? "+" : ""}${(((d.persistence_kwh - d.actual_kwh) / d.actual_kwh) * 100).toFixed(1)}%)`
+                      : "—"}
                   </td>
                 </tr>
               ))}

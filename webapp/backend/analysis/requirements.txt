@@ -1,0 +1,3 @@
+# Extra dependency for the offline analysis scripts only (the app doesn't need it).
+# Install on top of ../requirements.txt:  pip install -r analysis/requirements.txt
+matplotlib==3.11.2

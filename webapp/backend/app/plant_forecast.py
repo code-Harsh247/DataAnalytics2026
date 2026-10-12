@@ -119,13 +119,24 @@ def accuracy(p: PlantData) -> dict:
         actual, predicted = float(d.loc[day, "energy_kwh"]), float(forecast_by_day[day])
         if actual <= 0.1 or predicted <= 0.1:
             continue
+        # Persistence baseline: "tomorrow = today", the naive forecast to beat.
+        previous = (pd.Timestamp(day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        persistence = float(d.loc[previous, "energy_kwh"]) if previous in d.index and hours.get(previous, 0) >= 24 * MIN_COVERAGE else None
         days.append({"date": day, "forecast_kwh": round(predicted, 2), "actual_kwh": round(actual, 2),
-                     "error_pct": round((predicted - actual) / actual * 100, 1)})
+                     "error_pct": round((predicted - actual) / actual * 100, 1),
+                     "persistence_kwh": round(persistence, 2) if persistence is not None else None})
         ratios.append(actual / predicted)
     days = days[-ACCURACY_DAYS:]
     ratios = ratios[-ACCURACY_DAYS:]
     mape = round(float(np.mean([abs(x["error_pct"]) for x in days])), 1) if days else None
-    return {"days": days, "mape": mape, "ratios": ratios}
+    # Skill = 1 - MAE(forecast) / MAE(persistence), over days that have both.
+    paired = [x for x in days if x["persistence_kwh"] is not None]
+    skill = None
+    if len(paired) >= 3:
+        mae_f = np.mean([abs(x["forecast_kwh"] - x["actual_kwh"]) for x in paired])
+        mae_p = np.mean([abs(x["persistence_kwh"] - x["actual_kwh"]) for x in paired])
+        skill = round(float(1 - mae_f / mae_p), 3) if mae_p > 0 else None
+    return {"days": days, "mape": mape, "ratios": ratios, "skill_vs_persistence": skill}
 
 
 def _band(ratios: list[float]) -> tuple[float, float]:
@@ -177,7 +188,7 @@ def forecast(p: PlantData) -> dict:
         "timezone": p.tz,
         "days": days,
         "today": {"forecast": today_forecast, "actual": today_curve, "actual_kwh": round(today_actual, 2)},
-        "accuracy": {"days": acc["days"], "mape": acc["mape"]},
+        "accuracy": {"days": acc["days"], "mape": acc["mape"], "skill_vs_persistence": acc["skill_vs_persistence"]},
         "band": {"low": round(low, 3), "high": round(high, 3), "from_accuracy": len(acc["ratios"]) >= 3},
         "month_projection_kwh": round(projection, 1),
         "month_projection_revenue": round(projection * p.tariff, 2),

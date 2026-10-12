@@ -1341,3 +1341,34 @@ Overview's health line and in Health's alert history.
 the simulator; next round), multiple plants, exports, email alerts, real
 hardware, deployment.
 
+---
+
+## Analytics round — rigor and evidence
+
+*Planned 2026-10-12 (Harsh).* The product is broad; the analysis behind it
+needs to stand up to a data analytics review. Five additions, all as
+reproducible scripts in `webapp/backend/analysis/` (new, Harsh-owned; they
+import the models and harness, never modify them), with results in
+`FINDINGS.md` and a generated `analysis/REPORT.md` with figures.
+
+- [x] A1 **Forecast baselines + skill.** Compare the day-ahead forecast with
+      persistence (tomorrow = today) and climatology (trailing 30-day mean)
+      over **12 months** at the test location (previous-runs API vs ERA5
+      archive, through the same physics), by month. Skill = 1 − MAE / MAE_ref.
+      In the app: persistence and a skill score on Forecast's accuracy table.
+- [x] A2 **Sensitivity.** Recall by fault severity (pooled over seeds 1–8)
+      and F1 against measurement noise and site-irradiance error
+      (regenerated datasets). Turns "it's your own simulator" into a stated
+      detection limit.
+- [x] A3 **Uncertainty and significance.** Day-block bootstrap 95% CIs for
+      each model's F1; paired Wilcoxon signed-rank tests across seeds 1–8.
+- [x] A4 **EDA report.** Data profile, power vs irradiance, the temperature
+      effect on efficiency, daily profile, feature correlations, residual
+      distributions (healthy vs faulted), permutation feature importance of
+      the expected-power model.
+- [x] A5 **Episode-level detection.** Share of fault episodes caught, by
+      severity; time to detect; episode-level precision.
+
+Run everything: `python -m analysis.run_all` (from `webapp/backend`; needs
+`pip install -r analysis/requirements.txt`).
+

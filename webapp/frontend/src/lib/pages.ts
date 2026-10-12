@@ -69,7 +69,11 @@ export interface Forecast {
   timezone: string;
   days: ForecastDay[];
   today: { forecast: CurvePoint[]; actual: CurvePoint[]; actual_kwh: number };
-  accuracy: { days: { date: string; forecast_kwh: number; actual_kwh: number; error_pct: number }[]; mape: number | null };
+  accuracy: {
+    days: { date: string; forecast_kwh: number; actual_kwh: number; error_pct: number; persistence_kwh: number | null }[];
+    mape: number | null;
+    skill_vs_persistence: number | null; // 1 - MAE(forecast) / MAE("tomorrow = today")
+  };
   band: { low: number; high: number; from_accuracy: boolean };
   month_projection_kwh: number;
   month_projection_revenue: number;
