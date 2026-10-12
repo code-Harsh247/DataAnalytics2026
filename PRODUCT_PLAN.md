@@ -1324,9 +1324,9 @@ Finance (owners can already update their plant under RLS).
 browser on the test plant with a live gateway. Today's energy agrees across
 Overview / Production / Forecast (4.5 kWh at the time of checking); the
 7-day forecast and a 5.7% day-ahead accuracy show real values; the loss
-breakdown sums to delivered energy. **Not yet verified:** monthly totals and
-saving the system cost / payback. Both need `006_finance.sql` run in
-Supabase; until then those panels say so instead of failing.
+breakdown sums to delivered energy. Monthly totals and saving the system
+cost were verified once `006_finance.sql` was run (test plant: Sept 701 kWh,
+Oct 437 kWh so far; a 3,50,000 system pays back in 5.6 years).
 Contract tweak: `overview.today_curve` is `{actual: [{t, kw}], forecast:
 [{t, kw}]}` (two series on their own time points) rather than one merged
 list; `/status` gains `timezone`.
